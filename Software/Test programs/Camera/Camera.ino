@@ -83,7 +83,9 @@ button { margin-top: 20px; padding: 12px 25px; font-size: 16px; cursor: pointer;
 <div class="info">)rawliteral";
 
   html += "<p><b>Resolution:</b> " + String(resolution) + "</p>";
-  html += "<p><b>JPEG Quality:</b> " + String(s->status.quality) + "</p>";
+  html += "<p><b>XCLK Frequency:</b> " + String((s->xclk_freq_hz)/1000000) + " MHz</p>";
+  html += "<p><b>JPEG Quality:</b> " + String(s->status.quality) + "</p><br>";
+  html += "<p><b>CPU Frequency:</b> " + String(getCpuFrequencyMhz()) + " MHz</p>";
 
   html += R"rawliteral(</div></div>
 <a id="download-link" href="/capture.jpg" download="esp32-capture.jpg"><button>Store JPEG</button></a>
