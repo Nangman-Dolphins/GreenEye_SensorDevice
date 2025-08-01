@@ -23,8 +23,8 @@
 #define PCLK_GPIO_NUM     22
 
 // WiFi
-const char* ssid = "U+Net7DBC";
-const char* password = "DDAE018090";
+const char* ssid = "*";
+const char* password = "*";
 
 WebServer server(80);
 
@@ -122,9 +122,16 @@ void setup() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 10000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_SVGA; // VGA(640x480), SVGA(800x600), XGA(1024x768), UXGA(1600x1200)
-  config.jpeg_quality = 15; // (0-63, 0 is best quality)
+  config.frame_size = FRAMESIZE_VGA; // VGA(640x480), SVGA(800x600), XGA(1024x768), UXGA(1600x1200)
+  config.jpeg_quality = 18; // (0-63, 0 is best quality)
   config.fb_count = 1;
+
+  if (psramFound()) {
+    Serial.println("PSRAM found. Overriding with high quality settings.");
+    config.frame_size = FRAMESIZE_SVGA;
+    config.jpeg_quality = 13;
+    config.fb_count = 1;
+  }
 
   // Camera init
   esp_err_t err = esp_camera_init(&config);
@@ -135,8 +142,6 @@ void setup() {
 
   // tuning camera
   sensor_t * s = esp_camera_sensor_get();
-  //s->set_framesize(s, FRAMESIZE_SVGA); // VGA(640x480), SVGA(800x600), XGA(1024x768), UXGA(1600x1200)
-  //s->set_quality(s, 20);    // (0-63, 0 is best quality)
   s->set_vflip(s, 0);       // (1: on)
   s->set_hmirror(s, 0);     // (1: on)
   s->set_brightness(s, 0);  // (-2 ~ 2)
