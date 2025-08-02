@@ -148,12 +148,30 @@ void setup() {
   Serial.println("Tuning the camera!");
   
   sensor_t * s = esp_camera_sensor_get();
-  s->set_vflip(s, 0);       // (1: on)
-  s->set_hmirror(s, 0);     // (1: on)
-  s->set_brightness(s, 0);  // (-2 ~ 2)
-  s->set_contrast(s, 0);    // (-2 ~ 2)
-  s->set_saturation(s, 0);  // (-2 ~ 2)
-  s->set_awb_gain(s, 1);    // (1: on)
+
+    // rotate
+  //s->set_vflip(s, 0);       // (0: off)
+  //s->set_hmirror(s, 0);     // (0: off)
+
+    // default param
+  //s->set_brightness(s, 0);  // (-2 ~ 2) (0: default)
+  //s->set_contrast(s, 0);    // (-2 ~ 2) (0: default)
+  //s->set_saturation(s, 0);  // (-2 ~ 2) (0: default)
+
+    // detail param
+  s->set_whitebal(s, 1);       // AWB (1: on)
+  s->set_awb_gain(s, 1);       // AWB gain (1: on)
+  s->set_exposure_ctrl(s, 1);  // AEC (1: on)
+  //s->set_aec2(s, 0);             // AEC/AGC algorithm tuning (0: reaction with light (default))
+  s->set_gain_ctrl(s, 1);        // AGC (1: on)
+  //s->set_agc_gain(s, 0);         // AGC gain (0: auto(default))
+  //s->set_gainceiling(s, (gainceiling_t)0); // gain's ceiling value (0: auto(default))
+
+    // image quality correction
+  s->set_bpc(s, 1);            // bad pixel
+  s->set_wpc(s, 1);            // with pixel
+  s->set_raw_gma(s, 1);        // gamma
+  s->set_lenc(s, 1);           // lens distortion
 
   // WiFi connect
   WiFi.begin(ssid, password);
