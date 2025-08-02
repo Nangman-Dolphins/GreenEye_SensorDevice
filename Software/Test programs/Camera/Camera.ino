@@ -125,15 +125,17 @@ void setup() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 10000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_VGA; // VGA(640x480), SVGA(800x600), XGA(1024x768), UXGA(1600x1200)
-  config.jpeg_quality = 18; // (0-63, 0 is best quality)
   config.fb_count = 1;
 
   if (psramFound()) {
-    Serial.println("PSRAM found. Overriding with high quality settings.");
+    Serial.println("    -> PSRAM found. apply high quality settings.");
+    config.frame_size = FRAMESIZE_SXGA;  // VGA(640x480), SVGA(800x600), XGA(1024x768), UXGA(1600x1200)
+    config.jpeg_quality = 10; // (0-63, 0 is best quality)
+  } else {
+    Serial.println("    -> PSRAM not found. apply low quality settings.");
     config.frame_size = FRAMESIZE_SVGA;
-    config.jpeg_quality = 13;
-    config.fb_count = 1;
+    config.jpeg_quality = 18;
+    
   }
 
   // Camera init
