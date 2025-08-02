@@ -103,6 +103,7 @@ void setup() {
   Serial.begin(115200);
   Serial.println("Booting...");
 
+  Serial.println("> Configuring the camera!");
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -136,13 +137,16 @@ void setup() {
   }
 
   // Camera init
+  Serial.println("Initializing the camera!");
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
-    Serial.printf("Camera init failed with error 0x%x", err);
+    Serial.printf("    -> Camera init failed with error 0x%x", err);
     return;
   }
 
   // tuning camera
+  Serial.println("Tuning the camera!");
+  
   sensor_t * s = esp_camera_sensor_get();
   s->set_vflip(s, 0);       // (1: on)
   s->set_hmirror(s, 0);     // (1: on)
@@ -158,7 +162,7 @@ void setup() {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nWiFi connected");
+  Serial.println("\nWiFi Connected");
 
   // Register web server's handler
   server.on("/", HTTP_GET, handle_root);
@@ -167,7 +171,7 @@ void setup() {
   // start server
   server.begin();
 
-  Serial.print("> http://");
+  Serial.print("Server Start -> http://");
   Serial.println(WiFi.localIP());
 }
 
