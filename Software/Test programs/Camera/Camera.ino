@@ -67,6 +67,8 @@ void handle_root() {
     case FRAMESIZE_XGA:    resolution = "XGA (1024x768)"; break;
     case FRAMESIZE_SVGA:   resolution = "SVGA (800x600)"; break;
     case FRAMESIZE_VGA:    resolution = "VGA (640x480)"; break;
+    case FRAMESIZE_HVGA:   resolution = "HVGA (480x320)"; break;
+    case FRAMESIZE_QVGA:   resolution = "QVGA (320x240)"; break;
     default:               resolution = "Unknown";
   }
   String html = R"rawliteral(
@@ -129,12 +131,12 @@ void setup() {
 
   if (psramFound()) {
     Serial.println("    -> PSRAM found. apply high quality settings.");
-    config.frame_size = FRAMESIZE_SXGA;  // VGA(640x480), SVGA(800x600), XGA(1024x768), UXGA(1600x1200)
-    config.jpeg_quality = 10; // (0-63, 0 is best quality)
+    config.frame_size = FRAMESIZE_HVGA;  // VGA(640x480), SVGA(800x600), XGA(1024x768), UXGA(1600x1200)
+    config.jpeg_quality = 8; // (0-63, 0 is best quality)
   } else {
     Serial.println("    -> PSRAM not found. apply low quality settings.");
-    config.frame_size = FRAMESIZE_SVGA;
-    config.jpeg_quality = 18;
+    config.frame_size = FRAMESIZE_QVGA;
+    config.jpeg_quality = 16;
     
   }
 
