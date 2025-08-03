@@ -17,7 +17,7 @@ const char* password = "*";
 String scriptUrl = "https://script.google.com/macros/s/AKfycbwUXMSMaR3Xw7uUeZySXcjaTjwx4_akqiASyt-9ovJFu7iFPSdEFohQVrkX64Xfw3Ko/exec";
 String sheetName = SHEET_NAME; 
 
-int cycle = 0;
+int dataArr[DATA_NO] = {0,};
 
 void setup() {
   Serial.begin(115200);
@@ -26,6 +26,24 @@ void setup() {
   Serial.println("Sensor Initializing ...");
   pinMode(EN_PIN, OUTPUT);
   digitalWrite(EN_PIN, HIGH);
+
+  for(int i = 0; i < DATA_NO; i++){
+    int analog_data = 0;
+
+    for(int j = 0; j < DATA_SAMPLE; j++){
+      int temp = analogRead(SENS_PIN);
+      Serial.printf("[%d] ", temp);
+      analog_data += temp;
+      delay(50);
+    }
+    analog_data = analog_data / DATA_SAMPLE;
+
+    Serial.printf("  => %s[%d]: %d\n", SHEET_NAME, i, analog_data);
+    dataArr[i] = analog_data;
+
+    delay(200);
+  }
+  
 
   // --- Connect to WiFi ---
   WiFi.begin(ssid, password);
@@ -38,46 +56,33 @@ void setup() {
 }
 
 void loop() {
-  int analog_data = 0;
+  
+  for(int k = 0; k < DATA_NO; k++){
+    Serial.printf("[%d] Data > ", k);
+    HTTPClient http;
+    // Construct the final URL with all parameters.
+    String url = scriptUrl + "?sheet=" + sheetName + "&Sensor_Type="+ SENSER_TYPE + "&Value1=" + String(dataArr[k]);
+    Serial.print("Send request : ");
+    Serial.println(url);
 
-  for(int i = 0; i < DATA_SAMPLE; i++){
-    analog_data += analogRead(SENS_PIN);
-    delay(50);
+    http.begin(url);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+
+
+    int httpCode = http.GET();
+
+    // Check the response.
+    if (httpCode > 0) {
+      String payload = http.getString();
+      Serial.println("HTTP Code: " + String(httpCode));
+      Serial.println("Response: " + payload);
+    } else {
+      Serial.println("Error on HTTP request");
+    }
+
+    // Free up resources.
+    http.end();
   }
-  analog_data = analog_data / DATA_SAMPLE;
-  Serial.print("Done sensing : ");
-  Serial.println(analog_data);
-
-  HTTPClient http;
-  // Construct the final URL with all parameters.
-  String url = scriptUrl + "?sheet=" + sheetName + "&Sensor_Type="+ SENSER_TYPE + "&Value1=" + String(analog_data);
-  Serial.print("Send request : ");
-  Serial.println(url);
-
-  http.begin(url);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-
-
-  int httpCode = http.GET();
-
-  // Check the response.
-  if (httpCode > 0) {
-    String payload = http.getString();
-    Serial.println("HTTP Code: " + String(httpCode));
-    Serial.println("Response: " + payload);
-  } else {
-    Serial.println("Error on HTTP request");
-  }
-
-  // Free up resources.
-  http.end();
-
-  cycle++;
-  if(cycle > DATA_NO){
-    Serial.println("Archive END.");
-    while(true);
-  }
-
-
-  delay(1000); 
+  Serial.println("END");
+  while(true);
 }
