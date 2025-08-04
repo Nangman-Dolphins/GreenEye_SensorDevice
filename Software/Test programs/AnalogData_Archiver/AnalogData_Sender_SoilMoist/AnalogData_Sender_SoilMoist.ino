@@ -11,6 +11,8 @@
 #define SENSER_TYPE "SoilMoist"
 #define SENS_PIN    15 // IO15
 #define EN_PIN      13 // IO13
+const float alpha = 0.05; // smoothing const (0.01 ~ 0.1)
+float filteredValue = 0;
 
 // --- WiFi Settings ---
 const char* ssid = "*";
@@ -21,7 +23,7 @@ const char* password = "*";
 String scriptUrl = "https://script.google.com/macros/s/AKfycbwUXMSMaR3Xw7uUeZySXcjaTjwx4_akqiASyt-9ovJFu7iFPSdEFohQVrkX64Xfw3Ko/exec";
 String sheetName = SHEET_NAME; 
 
-int dataArr[DATA_NO] = {0,};
+float dataArr[DATA_NO] = {0,};
 
 void setup() {
   // Disable WiFI
@@ -42,16 +44,18 @@ void setup() {
   for(int i = 0; i < DATA_NO; i++){
     int analog_data = 0;
 
-    for(int j = 0; j < DATA_SAMPLE; j++){
-      int temp = analogRead(SENS_PIN);
-      Serial.printf("[%d] ", temp);
-      analog_data += temp;
-      delay(50);
-    }
-    analog_data = analog_data / DATA_SAMPLE;
+  filteredValue = analogRead(SENS_PIN);
 
-    Serial.printf("  => %s[%d]: %d\n", SHEET_NAME, i, analog_data);
-    dataArr[i] = analog_data;
+  for(int i = 0; i < DATA_NO; i++){
+    int rawValue = 0;
+    for(int j = 0; j < DATA_SAMPLE; j++) {
+      rawValue += analogRead(SENS_PIN);
+      delay(10);
+    }
+    filteredValue = alpha * (rawValue/DATA_SAMPLE) + (1.0 - alpha) * filteredValue;
+
+    Serial.printf("  => %s[%d]: %f\n", SHEET_NAME, i, filteredValue);
+    dataArr[i] = filteredValue;
 
     delay(200);
   }
