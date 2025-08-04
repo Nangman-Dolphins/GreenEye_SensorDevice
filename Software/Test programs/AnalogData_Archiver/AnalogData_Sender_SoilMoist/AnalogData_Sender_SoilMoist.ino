@@ -41,8 +41,17 @@ void setup() {
   pinMode(EN_PIN, OUTPUT);
   digitalWrite(EN_PIN, HIGH);
 
-  for(int i = 0; i < DATA_NO; i++){
-    int analog_data = 0;
+  
+  Serial.print("Sensor Stabilizing ");
+
+  for(int j = 0; j < 15; j++) {
+    analogRead(SENS_PIN);
+    Serial.print(".");
+    delay(1000);
+  }
+  Serial.println("Done!");
+
+  Serial.println("Sensor start sensing ...");
 
   filteredValue = analogRead(SENS_PIN);
 
