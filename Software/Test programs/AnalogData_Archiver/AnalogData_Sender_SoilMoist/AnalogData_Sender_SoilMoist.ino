@@ -1,3 +1,7 @@
+#include "esp_wifi.h"
+#include "esp_bt.h"
+#include "esp_bt_main.h"
+
 #include <WiFi.h>
 #include <HTTPClient.h>
 
@@ -20,6 +24,14 @@ String sheetName = SHEET_NAME;
 int dataArr[DATA_NO] = {0,};
 
 void setup() {
+  // Disable WiFI
+  esp_wifi_stop();
+  esp_wifi_deinit();
+
+  // Disable BT
+  esp_bt_controller_disable();
+  esp_bt_controller_deinit();
+
   Serial.begin(115200);
   Serial.println("=== Analog data archiver ===");
 
