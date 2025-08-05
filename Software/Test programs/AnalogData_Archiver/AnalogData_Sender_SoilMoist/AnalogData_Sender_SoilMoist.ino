@@ -20,7 +20,7 @@ const char* password = "*";
 
 // --- Google Script URL ---
 // Replace this with the Web App URL you got from Google Apps Script deployment.
-String scriptUrl = "https://script.google.com/macros/s/AKfycbwUXMSMaR3Xw7uUeZySXcjaTjwx4_akqiASyt-9ovJFu7iFPSdEFohQVrkX64Xfw3Ko/exec";
+String scriptUrl = "*";
 String sheetName = SHEET_NAME; 
 
 float dataArr[DATA_NO] = {0,};
