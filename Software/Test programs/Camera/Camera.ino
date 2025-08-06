@@ -30,6 +30,9 @@ WebServer server(80);
 
 // shooting camera
 void handle_jpg() {
+  analogWrite(4, 80);
+  delay(500);
+
   camera_fb_t * fb = NULL;
   
   // shooting!
@@ -50,6 +53,8 @@ void handle_jpg() {
   
   // return camera frame buffer
   esp_camera_fb_return(fb);
+  delay(500);
+  analogWrite(4, 0);
 }
 
 // root page handler
@@ -101,6 +106,8 @@ document.getElementById('download-link').href = document.getElementById('photo')
 
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // Brownout detector disable
+  pinMode(4, OUTPUT);
+  digitalWrite(4, HIGH);
 
   Serial.begin(115200);
   Serial.println("Booting...");
@@ -195,6 +202,7 @@ void setup() {
 
   Serial.print("Server Start -> http://");
   Serial.println(WiFi.localIP());
+  digitalWrite(4, LOW);
 }
 
 void loop() {
