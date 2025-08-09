@@ -10,14 +10,14 @@
 static const char DASHBOARD_MAIN_TEMPLATE[] PROGMEM = R"rawliteral(
 <!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>ESP32 Dashboard</title>
 <style>
-body{font-family:Arial,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background-color:#f0f2f5;margin:0}
-.container{background-color:#fff;padding:2rem;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.1);text-align:center;width:90%;max-width:420px}
-h1{color:#333;margin-bottom:2rem; line-height:1.4;}
+body{font-family:Arial,sans-serif;display:flex;flex-direction:column;justify-content:center;align-items:center;min-height:100vh;background-color:#f0f2f5;margin:0;width:100%;}
+.container{margin:0.5rem;background-color:#fff;padding:2rem;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.1);text-align:center;width:75%;max-width:420px}
+h1{color:#333;line-height:1.4;}
 .form-group{margin-bottom:1rem;text-align:left}
 label{display:block;margin-bottom:.5rem;font-weight:700;color:#555}
 input[type=text],input[type=password]{width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box}
-button{width:100%;padding:12px;color:#fff;border:none;border-radius:4px;font-size:1rem;cursor:pointer;background-color:#007bff}
-button:hover{background-color:#0056b3}
+button{width:100%;padding:12px;color:#fff;border:none;border-radius:4px;font-size:1rem;cursor:pointer;background-color:#128037}
+button:hover{background-color:#007025}
 .status-box{text-align:left;padding:1.5rem;border:1px solid #e0e0e0;border-radius:8px;margin-bottom:1.5rem}
 .status-item{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem}
 .status-label{font-weight:700;color:#333}
@@ -26,7 +26,7 @@ button:hover{background-color:#0056b3}
 .btn-danger{background-color:#dc3545}
 .btn-danger:hover{background-color:#c82333}
 </style>
-</head><body><div class="container"><h1>__DASHBOARD_TITLE__</h1>__PAGE_CONTENT__</div></body></html>
+</head><body><div class="container"><h1>__DASHBOARD_TITLE__</h1></div><div class="container">__PAGE_CONTENT__</div></body></html>
 )rawliteral";
 
 static const char STATUS_DASHBOARD_CONTENT[] PROGMEM = R"rawliteral(
