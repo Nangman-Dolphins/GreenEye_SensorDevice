@@ -20,9 +20,14 @@
 #define HREF_GPIO_NUM     23
 #define PCLK_GPIO_NUM     22
 
+#define DFT_QUALITY       15 // default quality for streaming
+#define HIGH_QUALITY      5  // high quality for analysis
+
+
 class Camera {
 private:
     camera_config_t config; // holds the camera configuration
+    sensor_t * s;
 
 public:
     Camera() {
@@ -45,13 +50,13 @@ public:
       config.pin_sccb_scl = SIOC_GPIO_NUM;
       config.pin_pwdn = PWDN_GPIO_NUM;
       config.pin_reset = RESET_GPIO_NUM;
-      config.xclk_freq_hz = 10000000;
+      config.xclk_freq_hz = 20000000;
       config.pixel_format = PIXFORMAT_JPEG; // use jpeg format for streaming
       
       // set default resolution to vga
-      config.frame_size = FRAMESIZE_QVGA; // 800x600
-      config.jpeg_quality = 12;           // 0-63, lower number means higher quality
-      config.fb_count = 2;                // use 2 frame buffers for svga stability
+      config.frame_size = FRAMESIZE_QVGA; // 800x600 (default)
+      config.jpeg_quality = DFT_QUALITY;  // 0-63, lower number means higher quality  (default)
+      config.fb_count = 2;                // use 2 frame buffers for svga stability  (default)
     }
 
     bool begin() {
@@ -63,11 +68,12 @@ public:
         }
 
         // apply custom camera settings after successful init
-        sensor_t * s = esp_camera_sensor_get(); // get the sensor object
+        s = esp_camera_sensor_get();
+
         if (s) { // if sensor object is valid
             // --- Resolution & Quality ---
-            s->set_framesize(s, FRAMESIZE_QVGA); // set frame size to qvga
-            s->set_quality(s, 12);               // set jpeg quality
+            s->set_framesize(s, FRAMESIZE_QVGA);  // set frame size to qvga (default)
+            s->set_quality(s, DFT_QUALITY);       // set jpeg quality (default)
 
             // --- Lens Correction ---
             s->set_lenc(s, 1);                   // enable lens correction
@@ -97,12 +103,25 @@ public:
         return true; // return true on success
     }
 
-    camera_fb_t* captureFrame() {
+    camera_fb_t* captureFrameForStream() {
         // capture a single frame from the camera
         return esp_camera_fb_get();
     }
 
-    void releaseFrame(camera_fb_t* fb) {
+    void releaseFrameForStream(camera_fb_t* fb) {
+        // return the frame buffer to be reused
+        esp_camera_fb_return(fb);
+    }
+
+    camera_fb_t* captureFrameForAnalyze() {
+        s->set_quality(s, HIGH_QUALITY);              // set jpeg quality (high)
+        // capture a single frame from the camera
+        return esp_camera_fb_get();
+    }
+
+    void releaseFrameForAnalyze(camera_fb_t* fb) {
+        s->set_quality(s, DFT_QUALITY);               // reset to jpeg quality (default)
+
         // return the frame buffer to be reused
         esp_camera_fb_return(fb);
     }

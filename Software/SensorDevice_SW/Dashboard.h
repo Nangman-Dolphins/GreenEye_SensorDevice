@@ -315,7 +315,7 @@ private:
         _server.sendContent(response);
 
         while (true) {
-            camera_fb_t *fb = _p_camera->captureFrame();
+            camera_fb_t *fb = _p_camera->captureFrameForStream();
             if (!fb) {
                 Serial.println("Camera capture failed");
                 break;
@@ -329,7 +329,7 @@ private:
             client.write(fb->buf, fb->len);
             client.print("\r\n");
 
-            _p_camera->releaseFrame(fb);
+            _p_camera->releaseFrameForStream(fb);
 
             if (!client.connected()) {
                 break;
