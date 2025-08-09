@@ -6,7 +6,7 @@
 #include <Preferences.h>
 #include <pgmspace.h>
 
-// Webpage HTML & CSS stored in PROGMEM ---
+// --- Webpage HTML & CSS stored in PROGMEM ---
 static const char DASHBOARD_MAIN_TEMPLATE[] PROGMEM = R"rawliteral(
 <!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>ESP32 Dashboard</title>
 <style>
@@ -40,7 +40,7 @@ static const char SETUP_FORM_CONTENT[] PROGMEM = R"rawliteral(
 
 static const char SUCCESS_PAGE_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="refresh" content="5; url=/">
+<meta http-equiv="refresh" content="10; url=/">
 <title>설정 저장됨</title>
 <style>
 body{font-family:Arial,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background-color:#f0f2f5;margin:0}
@@ -51,11 +51,11 @@ p{color:#555;font-size:1.1rem;}
 </style></head>
 <body><div class="container">
 <svg class="icon" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"></path></svg>
-<h1>저장 완료!</h1><p>WiFi 정보가 저장되었습니다.<br>잠시 후(<span id="countdown">5</span>초) 메인 페이지로 이동합니다...</p>
+<h1>저장 완료!</h1><p>WiFi 정보가 저장되었습니다.<br>잠시 후(<span id="countdown">10</span>초) 메인 페이지로 이동합니다...</p>
 </div>
 <script>
   var countdownElement = document.getElementById('countdown');
-  var seconds = 5;
+  var seconds = 10;
   var interval = setInterval(function() {
     seconds--;
     countdownElement.textContent = seconds;
@@ -69,7 +69,7 @@ p{color:#555;font-size:1.1rem;}
 
 static const char FORGET_SUCCESS_PAGE_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="refresh" content="5; url=/">
+<meta http-equiv="refresh" content="10; url=/">
 <title>정보 삭제됨</title>
 <style>
 body{font-family:Arial,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background-color:#f0f2f5;margin:0}
@@ -80,11 +80,11 @@ p{color:#555;font-size:1.1rem;}
 </style></head>
 <body><div class="container">
 <svg class="icon" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"></path></svg>
-<h1>삭제 완료!</h1><p>저장된 WiFi 정보가 삭제되었습니다.<br>잠시 후(<span id="countdown">5</span>초) 메인 페이지로 이동합니다...</p>
+<h1>삭제 완료!</h1><p>저장된 WiFi 정보가 삭제되었습니다.<br>잠시 후(<span id="countdown">10</span>초) 메인 페이지로 이동합니다...</p>
 </div>
 <script>
   var countdownElement = document.getElementById('countdown');
-  var seconds = 5;
+  var seconds = 10;
   var interval = setInterval(function() {
     seconds--;
     countdownElement.textContent = seconds;
@@ -97,23 +97,26 @@ p{color:#555;font-size:1.1rem;}
 )rawliteral";
 
 
-// A class to encapsulate all dashboard and WiFi setup functionality
+
 class Dashboard {
 private:
     WebServer _server;
     Preferences _preferences;
     String _hostname;
     String _ap_password;
+    bool _debug_enabled; // variable to control debug output
 
 public:
-    Dashboard(const char* apPassword = "defaultPW") 
-        : _server(80), _ap_password(apPassword) {}
+    Dashboard(const char* apPassword = "defaultPW", bool debug = false) 
+        : _server(80), _ap_password(apPassword), _debug_enabled(debug) {}
 
     void begin() {
         Serial.begin(115200);
-        Serial.println("\nBooting Dashboard (ge-sd-XXXX)...");
+        if (_debug_enabled) {
+            Serial.println("\nFunction called: begin()");
+            Serial.println("Booting Dashboard (ge-sd-XXXX)...");
+        }
 
-        // --- MODIFIED: Create the unified hostname "ge-sd-XXXX" ---
         String mac_address = WiFi.macAddress();
         String mac_suffix = mac_address.substring(12, 14) + mac_address.substring(15, 17);
         mac_suffix.toUpperCase();
@@ -122,36 +125,36 @@ public:
         _preferences.begin("wifi-creds", false);
         WiFi.mode(WIFI_AP_STA);
         
-        // Use the unified hostname for the AP SSID
         WiFi.softAP(_hostname.c_str(), _ap_password.c_str()); 
         
         IPAddress apIP = WiFi.softAPIP();
-        Serial.println("--- Access Point Started ---");
-        Serial.print("AP SSID: "); Serial.println(_hostname);
-        Serial.print("AP IP Address: "); Serial.println(apIP);
-        Serial.println("--------------------------");
+        if (_debug_enabled) {
+            Serial.println("--- Access Point Started ---");
+            Serial.print("AP SSID: "); Serial.println(_hostname);
+            Serial.print("AP IP Address: "); Serial.println(apIP);
+            Serial.println("--------------------------");
+        }
 
-        // Use the stable initialization order
         setupWebServer();
         delay(100);
         
-        // Use the unified hostname for mDNS
         if (MDNS.begin(_hostname.c_str())) {
             MDNS.addService("http", "tcp", 80);
-            Serial.println("mDNS responder started.");
-            Serial.print("Access the dashboard at: http://");
-            Serial.print(_hostname);
-            Serial.println(".local");
+            if (_debug_enabled) {
+                Serial.println("mDNS responder started.");
+                Serial.print("Access the dashboard at: http://");
+                Serial.print(_hostname);
+                Serial.println(".local");
+            }
         } else {
-            Serial.println("Error setting up mDNS responder!");
+            if (_debug_enabled) Serial.println("Error setting up mDNS responder!");
         }
 
-        // Attempt to connect to a saved WiFi network
         String saved_ssid = _preferences.getString("ssid", "");
         if (saved_ssid != "") {
             connectToWiFi();
         } else {
-            Serial.println("No saved STA credentials. Ready to be configured.");
+            if (_debug_enabled) Serial.println("No saved STA credentials. Ready to be configured.");
         }
     }
 
@@ -165,28 +168,31 @@ public:
 
 private:
     void connectToWiFi() {
+        if (_debug_enabled) Serial.println("Function called: connectToWiFi()");
         String ssid = _preferences.getString("ssid", "");
         String password = _preferences.getString("password", "");
-        Serial.print("Attempting to connect to STA network: "); Serial.println(ssid);
+        if (_debug_enabled) { Serial.print("Attempting to connect to STA network: "); Serial.println(ssid); }
         WiFi.begin(ssid.c_str(), password.c_str());
     }
 
     void setupWebServer() {
+        if (_debug_enabled) Serial.println("Function called: setupWebServer()");
         _server.on("/", HTTP_GET, std::bind(&Dashboard::handleRoot, this));
         _server.on("/save", HTTP_POST, std::bind(&Dashboard::handleSave, this));
         _server.on("/forget", HTTP_POST, std::bind(&Dashboard::handleForget, this));
         _server.onNotFound([this]() { 
+            if (_debug_enabled) Serial.println("Function called: onNotFound");
             _server.send(404, "text/plain", "404: Not Found"); 
         });
         _server.begin();
-        Serial.println("HTTP server started.");
+        if (_debug_enabled) Serial.println("HTTP server started.");
     }
 
     void handleRoot() {
+        if (_debug_enabled) Serial.println("Function called: handleRoot()");
         String page_template = FPSTR(DASHBOARD_MAIN_TEMPLATE);
         String page_content;
         
-        // The title now shows the full hostname
         String title = "GreenEye 센서단말<br>[" + _hostname + "]";
         page_template.replace("__DASHBOARD_TITLE__", title);
 
@@ -203,6 +209,7 @@ private:
     }
 
     void handleSave() {
+        if (_debug_enabled) Serial.println("Function called: handleSave()");
         _preferences.putString("ssid", _server.arg("ssid"));
         _preferences.putString("password", _server.arg("password"));
         _server.send_P(200, "text/html", SUCCESS_PAGE_HTML);
@@ -211,6 +218,7 @@ private:
     }
 
     void handleForget() {
+        if (_debug_enabled) Serial.println("Function called: handleForget()");
         _preferences.clear();
         MDNS.end();
         _server.send_P(200, "text/html", FORGET_SUCCESS_PAGE_HTML);
