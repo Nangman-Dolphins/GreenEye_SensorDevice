@@ -5,6 +5,7 @@
 #include <ESPmDNS.h>   // for .local domain names
 #include <Preferences.h> // for non-volatile storage
 #include <pgmspace.h>  // for storing data in flash memory
+#include "Camera.h"
 
 // --- Webpage HTML & CSS stored in PROGMEM ---
 static const char DASHBOARD_MAIN_TEMPLATE[] PROGMEM = R"rawliteral(
@@ -25,12 +26,12 @@ button:hover{background-color:#007025}
 .status-connected{color:#28a745;font-weight:700}
 .btn-danger{background-color:#dc3545}
 .btn-danger:hover{background-color:#c82333}
-a{margin:0.5rem;width:40%;}
+a{margin:0.5rem;width:30%; text-decoration:none;}
 .nav{display:flex;align-items:center;flex-direction:row;justify-content:center;}
 .nav-button{background-color: #666666;}
 .nav-button:hover{background-color: #333;}
 </style>
-</head><body><div class="container"><h1>__DASHBOARD_TITLE__</h1><br><div class="nav"><a href="/"><button class="nav-button">WiFi 설정</button></a><a href="/dashboard"><button class="nav-button">대시보드</button></a></div></div>
+</head><body><div class="container"><h1>__DASHBOARD_TITLE__</h1><br><div class="nav"><a href="/"><button class="nav-button">WiFi 설정</button></a><a href="/dashboard"><button class="nav-button">대시보드</button></a><a href="/camera"><button class="nav-button">카메라</button></a></div></div>
 <div class="container">__PAGE_CONTENT__</div>
 </body></html>
 )rawliteral";
@@ -114,6 +115,12 @@ p{color:#555;font-size:1.1rem;}
 </body></html>
 )rawliteral";
 
+static const char CAMERA_CONTENT[] PROGMEM = R"rawliteral(
+<div>
+    <img src="/stream" style="width:100%; max-width:400px; border-radius:8px;">
+</div>
+)rawliteral";
+
 
 class Dashboard {
 private:
@@ -131,11 +138,16 @@ private:
     float* _p_moisture;
     float* _p_ec;
 
+    // for camera handling
+    Camera* _p_camera;
+
 public:
     Dashboard(
         float* p_temp_ambient, float* p_humidity, float* p_light,
         float* p_temp_soil, float* p_moisture, float* p_ec,
-        const char* apPassword = "defaultPW", bool debug = false
+        Camera* p_camera,
+        const char* apPassword = "defaultPW", 
+        bool debug = false
     ) : _server(80), // initialize server on port 80
         _ap_password(apPassword),        // set ap password
         _debug_enabled(debug),           // set debug mode
@@ -144,7 +156,8 @@ public:
         _p_light(p_light),               // store pointer to light
         _p_temp_soil(p_temp_soil),       // store pointer to soil temp
         _p_moisture(p_moisture),         // store pointer to moisture
-        _p_ec(p_ec)                      // store pointer to ec
+        _p_ec(p_ec),                     // store pointer to ec
+        _p_camera(p_camera)
     {}
 
     void begin() {
@@ -212,6 +225,8 @@ private:
         _server.on("/save", HTTP_POST, std::bind(&Dashboard::handleSave, this)); // route for saving credentials
         _server.on("/forget", HTTP_POST, std::bind(&Dashboard::handleForget, this)); // route for forgetting credentials
         _server.on("/dashboard", HTTP_GET, std::bind(&Dashboard::handleDashboard, this)); // route for sensor dashboard
+        _server.on("/camera", HTTP_GET, std::bind(&Dashboard::handleCameraPage, this));
+        _server.on("/stream", HTTP_GET, std::bind(&Dashboard::handleStream, this));
         _server.onNotFound([this]() { // handler for any other page
             if (_debug_enabled) { Serial.println("Function called: onNotFound"); } // log 404
             _server.send(404, "text/plain", "404: Not Found"); // send 404 error
@@ -276,5 +291,49 @@ private:
         _server.send_P(200, "text/html", FORGET_SUCCESS_PAGE_HTML); // send forgotten page
         delay(2000); // wait for page to be sent
         ESP.restart(); // restart the device
+    }
+
+    void handleCameraPage() {
+        if (_debug_enabled) { Serial.println("Function called: handleCameraPage()"); }
+        String page_template = FPSTR(DASHBOARD_MAIN_TEMPLATE);
+        String page_content = FPSTR(CAMERA_CONTENT);
+        String title = "GreenEye 센서단말<br>[" + _hostname + "]";
+        page_template.replace("__DASHBOARD_TITLE__", title);
+        page_template.replace("__PAGE_CONTENT__", page_content);
+        _server.send(200, "text/html", page_template);
+    }
+
+    void handleStream() {
+        if (!_p_camera) {
+            _server.send(503, "text/plain", "Camera not initialized");
+            return;
+        }
+
+        WiFiClient client = _server.client();
+        String response = "HTTP/1.1 200 OK\r\n";
+        response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
+        _server.sendContent(response);
+
+        while (true) {
+            camera_fb_t *fb = _p_camera->captureFrame();
+            if (!fb) {
+                Serial.println("Camera capture failed");
+                break;
+            }
+
+            client.print("--frame\r\n");
+            client.print("Content-Type: image/jpeg\r\n");
+            client.print("Content-Length: ");
+            client.println(fb->len);
+            client.println();
+            client.write(fb->buf, fb->len);
+            client.print("\r\n");
+
+            _p_camera->releaseFrame(fb);
+
+            if (!client.connected()) {
+                break;
+            }
+        }
     }
 };

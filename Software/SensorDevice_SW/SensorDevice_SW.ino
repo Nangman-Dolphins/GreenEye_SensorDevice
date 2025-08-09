@@ -1,4 +1,5 @@
 #include "Dashboard.h"
+#include "Camera.h"
 
 // Dummy datas
 float ambient_temp = 25.3;
@@ -8,6 +9,8 @@ float soil_temp = 22.8;
 float soil_moisture = 55.4;
 float soil_ec = 1250;
 
+Camera camera;
+
 Dashboard dashboard(
     &ambient_temp, 
     &ambient_humidity, 
@@ -15,12 +18,21 @@ Dashboard dashboard(
     &soil_temp, 
     &soil_moisture, 
     &soil_ec,
-    "defaultPW", // AP's PW
-    true         // activate debug mode
+    &camera,      // camera
+    "defaultPW",  // AP's PW
+    true          // activate debug mode
 );
 
+
 void setup() {
+  Serial.begin(115200);
+
   dashboard.begin();
+
+  if(!camera.begin()){
+    Serial.println("Failed to start camera");
+    return;
+  }
 }
 
 void loop() {
