@@ -165,17 +165,18 @@ void setup() {
   //s->set_hmirror(s, 0);     // (0: off)
 
     // default param
-  //s->set_brightness(s, 0);  // (-2 ~ 2) (0: default)
+  s->set_brightness(s, 1);  // (-2 ~ 2) (0: default)
   //s->set_contrast(s, 0);    // (-2 ~ 2) (0: default)
-  //s->set_saturation(s, 0);  // (-2 ~ 2) (0: default)
+  s->set_saturation(s, 1);  // (-2 ~ 2) (0: default)
 
     // detail param
   s->set_whitebal(s, 1);       // AWB (1: on)
   s->set_awb_gain(s, 1);       // AWB gain (1: on)
   s->set_exposure_ctrl(s, 1);  // AEC (1: on)
+  s->set_aec_value(s, 300);   // value of AEC (0~1200)
   //s->set_aec2(s, 0);             // AEC/AGC algorithm tuning (0: reaction with light (default))
   s->set_gain_ctrl(s, 1);        // AGC (1: on)
-  //s->set_agc_gain(s, 0);         // AGC gain (0: auto(default))
+  s->set_agc_gain(s, 0);         // AGC gain (0: auto(default))
   //s->set_gainceiling(s, (gainceiling_t)0); // gain's ceiling value (0: auto(default))
 
     // image quality correction
@@ -184,6 +185,10 @@ void setup() {
   s->set_raw_gma(s, 1);        // gamma
   s->set_lenc(s, 1);           // lens distortion
 
+
+  // --- special effect ---
+  //s->set_special_effect(s, 0);        // none 
+  
   // WiFi connect
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi");
