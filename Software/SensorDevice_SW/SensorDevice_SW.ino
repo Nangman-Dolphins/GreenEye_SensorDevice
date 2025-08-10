@@ -8,6 +8,7 @@ float light_intensity = 15000;
 float soil_temp = 22.8;
 float soil_moisture = 55.4;
 float soil_ec = 1250;
+String ccu_address = "";
 
 Camera camera;
 
@@ -19,6 +20,7 @@ Dashboard dashboard(
     &soil_moisture, 
     &soil_ec,
     &camera,      // camera
+    &ccu_address,
     "defaultPW",  // AP's PW
     true          // activate debug mode
 );
