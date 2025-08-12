@@ -64,8 +64,8 @@ bool initCamera() {
   config.pixel_format = PIXFORMAT_JPEG;
   
   // Image quality settings.
-  config.frame_size = FRAMESIZE_VGA; // 640x480
-  config.jpeg_quality = 12; // 0-63, lower number means higher quality.
+  config.frame_size = FRAMESIZE_QVGA; //
+  config.jpeg_quality = 5; // 0-63, lower number means higher quality.
   config.fb_count = 1;
 
   // Initialize camera.
