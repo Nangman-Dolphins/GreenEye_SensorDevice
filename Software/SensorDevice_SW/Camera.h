@@ -54,7 +54,7 @@ public:
       config.pixel_format = PIXFORMAT_JPEG; // use jpeg format for streaming
       
       // set default resolution to vga
-      config.frame_size = FRAMESIZE_QVGA; // 800x600 (default)
+      config.frame_size = FRAMESIZE_QVGA; // 320x240 (default)
       config.jpeg_quality = DFT_QUALITY;  // 0-63, lower number means higher quality  (default)
       config.fb_count = 2;                // use 2 frame buffers for svga stability  (default)
     }
