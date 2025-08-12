@@ -13,7 +13,7 @@ static const char DASHBOARD_MAIN_TEMPLATE[] PROGMEM = R"rawliteral(
 <style>
 body{font-family:Arial,sans-serif;display:flex;flex-direction:column;justify-content:center;align-items:center;height:100%;background-color:#f0f2f5;margin:0;padding-top:1rem;padding-bottom:1rem;width:100%;box-sizing:border-box;}
 .container{margin:0.5rem;background-color:#fff;padding:2rem;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.1);text-align:center;width:90%;max-width:420px;box-sizing:border-box;}
-h1{color:#333;line-height:1.2;margin-top:0;}
+h1{color:#333;line-height:1.2;margin-top:0;margin-bottom:0.5rem;}
 .form-group{margin-bottom:1.5rem;text-align:left}
 label{display:block;margin-bottom:.5rem;font-weight:700;color:#555}
 input[type=text],input[type=password]{width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box}
@@ -28,10 +28,11 @@ button:hover{background-color:#007025}
 .btn-danger:hover{background-color:#c82333}
 a{margin:0.5rem;width:30%; text-decoration:none;}
 .nav{margin-top:-1rem;margin-bottom:-1rem;display:flex;align-items:center;flex-direction:row;justify-content:center;}
-.nav-button{background-color: #666666;}
-.nav-button:hover{background-color: #333;}
+.nav-button{background-color:#666666;}
+.nav-button:hover{background-color:#333;}
+.battery-display{font-size:0.9rem;color:#333;margin-top:-0.5rem;margin-bottom:0.5rem;}
 </style>
-</head><body><div class="container"><h1>__DASHBOARD_TITLE__</h1><br>
+</head><body><div class="container"><div class="battery-display">배터리 잔량 __BATTERY_LEVEL__%</div><h1>__DASHBOARD_TITLE__</h1><br>
     <div class="nav"><a href="/"><button class="nav-button">연결 설정</button></a><a href="/dashboard"><button class="nav-button">센서 값</button></a><a href="/camera"><button class="nav-button">카메라</button></a></div></div>
 <div class="container">__PAGE_CONTENT__</div></body></html>
 )rawliteral";
@@ -47,7 +48,7 @@ static const char DEVICE_STATUS_CONTENT[] PROGMEM = R"rawliteral(
         <div class="form-group"><hr style="border:none;border-top:0px solid #e0e0e0;margin:1rem 0;">
             <input type="text" id="ccu_address" name="ccu_address" placeholder="예: ge-sd-xxxx.local">
         </div>
-        <button type="submit">새 CCU 주소 저장 및 연결</button>
+        <button type="submit">새 CCU 주소 저장</button>
     </form>
 </div>
 )rawliteral";
@@ -141,31 +142,17 @@ p{color:#555;font-size:1.1rem;}
 
 static const char CCU_SAVE_SUCCESS_PAGE_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="refresh" content="10; url=/">
+<meta http-equiv="refresh" content="3; url=/">
 <title>CCU 주소 저장됨</title>
 <style>
 body{font-family:Arial,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background-color:#f0f2f5;margin:0}
 .container{background-color:#fff;padding:3rem;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.1);text-align:center}
-.icon{width:50px;height:50px;margin-bottom:1rem;fill:#28a745}
-h1{color:#28a745;margin-bottom:1rem;}
+h1{color:#128037;margin-bottom:1rem;}
 p{color:#555;font-size:1.1rem;}
 </style></head>
 <body><div class="container">
-<svg class="icon" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"></path></svg>
-<h1>저장 완료!</h1><p>CCU 주소가 저장되었습니다.<br>잠시 후(<span id="countdown">10</span>초) 메인 페이지로 이동합니다...</p>
-</div>
-<script>
-  var countdownElement = document.getElementById('countdown');
-  var seconds = 10;
-  var interval = setInterval(function() {
-    seconds--;
-    countdownElement.textContent = seconds;
-    if (seconds <= 0) {
-      clearInterval(interval);
-    }
-  }, 1000);
-</script>
-</body></html>
+<h1>저장 완료!</h1><p>CCU 주소가 저장되었습니다.<br>잠시 후 메인 페이지로 돌아갑니다...</p>
+</div></body></html>
 )rawliteral";
 
 
@@ -177,6 +164,7 @@ private:
     String _ap_password;        // holds the ap password
     bool _debug_enabled;        // flag for debug mode
 
+    int* _p_battery_level;    // pointer for battery level
     float* _p_temp_ambient;     // pointer for ambient temp
     float* _p_humidity;         // pointer for ambient humidity
     float* _p_light;            // pointer for light intensity
@@ -188,6 +176,7 @@ private:
 
 public:
     Dashboard(
+        int* p_battery_level,
         float* p_temp_ambient, float* p_humidity, float* p_light,
         float* p_temp_soil, float* p_moisture, float* p_ec,
         Camera* p_camera,
@@ -197,6 +186,7 @@ public:
     ) : _server(80), // initialize server on port 80
         _ap_password(apPassword),        // set ap password from argument
         _debug_enabled(debug),           // set debug mode from argument
+        _p_battery_level(p_battery_level),// store pointer to battery level
         _p_temp_ambient(p_temp_ambient), // store pointer to ambient temp
         _p_humidity(p_humidity),         // store pointer to humidity
         _p_light(p_light),               // store pointer to light
@@ -221,7 +211,6 @@ public:
         
         if (_p_ccu_address) { // if the ccu address pointer is valid
             *_p_ccu_address = _preferences.getString("ccu_address", ""); // load saved ccu address
-            if (_debug_enabled) { Serial.print("[DEBUG] Loaded CCU address from NVS: "); Serial.println(*_p_ccu_address); }
         }
 
         WiFi.mode(WIFI_AP_STA); // set wifi to both ap and station mode
@@ -247,14 +236,14 @@ public:
                 Serial.println(".local");
             }
         } else { // if mDNS fails
-             if (_debug_enabled) Serial.println("[ERROR] Error setting up mDNS responder!"); // log the error
+             if (_debug_enabled) { Serial.println("[ERROR] Error setting up mDNS responder!"); } // log the error
         }
         
         String saved_ssid = _preferences.getString("ssid", ""); // read saved ssid from storage
         if (saved_ssid != "") { // if ssid exists
             connectToWiFi(); // try to connect to the saved network
         } else { // if no ssid is saved
-            if (_debug_enabled) Serial.println("[INFO] No saved STA credentials.");
+            if (_debug_enabled) { Serial.println("[INFO] No saved STA credentials."); }
         }
     }
 
@@ -292,64 +281,53 @@ private:
         _server.begin(); // start the web server
         if (_debug_enabled) { Serial.println("[INFO] HTTP server started."); }
     }
-
-    void handleRoot() {
-        if (_debug_enabled) { Serial.println("[INFO] Function called: handleRoot()"); } // log function call
+    
+    String buildPage(const char* content_progmem) {
         String page_template = FPSTR(DASHBOARD_MAIN_TEMPLATE); // load main template from flash
-        String page_content; // prepare string for page content
-        
+        String page_content = FPSTR(content_progmem); // load specific content from flash
+
         String title = "GreenEye 센서단말<br>[" + _hostname + "]"; // create dynamic title
         page_template.replace("__DASHBOARD_TITLE__", title); // replace title placeholder
 
-        if (isConnected()) { // if connected to a router
-            if (_debug_enabled) { Serial.println("[DEBUG] Serving DEVICE_STATUS_CONTENT."); }
-            page_content = FPSTR(DEVICE_STATUS_CONTENT); // load status page content
-            String current_ssid = _preferences.getString("ssid", "N/A"); // get current ssid
-            page_content.replace("__CURRENT_SSID__", current_ssid); // replace ssid placeholder
-            
-            String current_ccu = "Not Set"; // default text for ccu address
-            if (_p_ccu_address && !(*_p_ccu_address).isEmpty()) { // if pointer is valid and string is not empty
-                current_ccu = *_p_ccu_address; // get value from pointer
-            }
-            page_content.replace("__CURRENT_CCU_ADDRESS__", current_ccu); // replace ccu placeholder
-
-        } else { // if not connected
-            if (_debug_enabled) { Serial.println("[DEBUG] Serving SETUP_FORM_CONTENT."); }
-            page_content = FPSTR(SETUP_FORM_CONTENT); // load setup form content
+        if (_p_battery_level) { // if battery pointer is valid
+            page_template.replace("__BATTERY_LEVEL__", String(*_p_battery_level)); // replace battery placeholder
+        } else { // if pointer is not valid
+            page_template.replace("__BATTERY_LEVEL__", "N/A"); // show not available
         }
 
+        if (content_progmem == DEVICE_STATUS_CONTENT) { // if it is the status page
+            page_content.replace("__CURRENT_SSID__", _preferences.getString("ssid", "N/A")); // replace ssid
+            String current_ccu = "Not Set"; // default text for ccu address
+            if (_p_ccu_address && !(*_p_ccu_address).isEmpty()) { current_ccu = *_p_ccu_address; } // get value
+            page_content.replace("__CURRENT_CCU_ADDRESS__", current_ccu); // replace ccu placeholder
+        }
+        else if (content_progmem == DASHBOARD_CONTENT) { // if it is the sensor dashboard page
+            if (_p_temp_ambient) page_content.replace("__TEMP_AMBIENT__", String(*_p_temp_ambient, 1)); // update with sensor data
+            if (_p_humidity)     page_content.replace("__HUMIDITY__",     String(*_p_humidity, 1));
+            if (_p_light)        page_content.replace("__LIGHT__",        String(*_p_light, 1));
+            if (_p_temp_soil)    page_content.replace("__TEMP_SOIL__",    String(*_p_temp_soil, 1));
+            if (_p_moisture)     page_content.replace("__MOISTURE__",     String(*_p_moisture, 1));
+            if (_p_ec)           page_content.replace("__EC__",           String(*_p_ec, 1));
+        }
+        
         page_template.replace("__PAGE_CONTENT__", page_content); // insert content into template
-        _server.send(200, "text/html", page_template); // send the final page
+        return page_template; // return the complete html string
+    }
+
+    void handleRoot() {
+        if (_debug_enabled) { Serial.println("[INFO] Function called: handleRoot()"); } // log function call
+        const char* content = isConnected() ? DEVICE_STATUS_CONTENT : SETUP_FORM_CONTENT; // select content based on wifi status
+        _server.send(200, "text/html", buildPage(content)); // build and send the page
     }
 
     void handleDashboard() {
         if (_debug_enabled) { Serial.println("[INFO] Function called: handleDashboard()"); } // log function call
-        String page_template = FPSTR(DASHBOARD_MAIN_TEMPLATE); // load main template from flash
-        String page_content = FPSTR(DASHBOARD_CONTENT); // load dashboard content from flash
-
-        String title = "GreenEye 센서단말<br>[" + _hostname + "]"; // create dynamic title
-        page_template.replace("__DASHBOARD_TITLE__", title); // replace title placeholder
-        
-        if (_debug_enabled) { Serial.println("[DEBUG] Populating sensor data..."); }
-        if (_p_temp_ambient) page_content.replace("__TEMP_AMBIENT__", String(*_p_temp_ambient, 1)); // update with sensor data
-        if (_p_humidity)     page_content.replace("__HUMIDITY__",     String(*_p_humidity, 1));
-        if (_p_light)        page_content.replace("__LIGHT__",        String(*_p_light, 1));
-        if (_p_temp_soil)    page_content.replace("__TEMP_SOIL__",    String(*_p_temp_soil, 1));
-        if (_p_moisture)     page_content.replace("__MOISTURE__",     String(*_p_moisture, 1));
-        if (_p_ec)           page_content.replace("__EC__",           String(*_p_ec, 1));
-        
-        page_template.replace("__PAGE_CONTENT__", page_content); // insert content into template
-        _server.send(200, "text/html", page_template); // send the final page
+        _server.send(200, "text/html", buildPage(DASHBOARD_CONTENT)); // build and send the page
     }
 
     void handleCameraPage() {
         if (_debug_enabled) { Serial.println("[INFO] Function called: handleCameraPage()"); } // log function call
-        String page_template = FPSTR(DASHBOARD_MAIN_TEMPLATE); // load main template
-        String page_content = FPSTR(CAMERA_CONTENT); // load camera page content
-        String title = "GreenEye 센서단말<br>[" + _hostname + "]"; // create dynamic title
-        page_template.replace("__DASHBOARD_TITLE__", title); // replace placeholder
-        page_template.replace("__PAGE_CONTENT__", page_content); // replace placeholder
-        _server.send(200, "text/html", page_template); // send final page
+        _server.send(200, "text/html", buildPage(CAMERA_CONTENT)); // build and send the page
     }
 
     void handleStream() {

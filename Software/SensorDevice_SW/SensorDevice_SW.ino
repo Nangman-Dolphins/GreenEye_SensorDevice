@@ -2,6 +2,7 @@
 #include "Camera.h"
 
 // Dummy datas
+int   battery_level = 100;
 float ambient_temp = 25.3;
 float ambient_humidity = 62.1;
 float light_intensity = 15000;
@@ -13,6 +14,7 @@ String ccu_address = "";
 Camera camera;
 
 Dashboard dashboard(
+    &battery_level,
     &ambient_temp, 
     &ambient_humidity, 
     &light_intensity, 
