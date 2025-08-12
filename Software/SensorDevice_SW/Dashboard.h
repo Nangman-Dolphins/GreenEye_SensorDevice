@@ -8,16 +8,6 @@
 #include "Camera.h"    // include the custom camera class
 
 // --- HTML Content Pages ---
-#pragma once // Prevents multiple inclusion of the header file
-
-#include <WiFi.h>
-#include <WebServer.h>
-#include <ESPmDNS.h>
-#include <Preferences.h>
-#include <pgmspace.h>
-#include "Camera.h"
-
-// --- Webpage HTML & CSS stored in PROGMEM ---
 static const char DASHBOARD_MAIN_TEMPLATE[] PROGMEM = R"rawliteral(
 <!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>ESP32 Dashboard</title>
 <style>
@@ -181,20 +171,20 @@ p{color:#555;font-size:1.1rem;}
 
 class Dashboard {
 private:
-    WebServer _server;
-    Preferences _preferences;
-    String _hostname;
-    String _ap_password;
-    bool _debug_enabled;
+    WebServer _server;          // web server object
+    Preferences _preferences;   // non-volatile storage handler
+    String _hostname;           // holds the device hostname, e.g. "ge-sd-XXXX"
+    String _ap_password;        // holds the ap password
+    bool _debug_enabled;        // flag for debug mode
 
-    float* _p_temp_ambient;
-    float* _p_humidity;
-    float* _p_light;
-    float* _p_temp_soil;
-    float* _p_moisture;
-    float* _p_ec;
-    Camera* _p_camera;
-    String* _p_ccu_address;
+    float* _p_temp_ambient;     // pointer for ambient temp
+    float* _p_humidity;         // pointer for ambient humidity
+    float* _p_light;            // pointer for light intensity
+    float* _p_temp_soil;        // pointer for soil temperature
+    float* _p_moisture;         // pointer for soil moisture
+    float* _p_ec;               // pointer for soil conductivity
+    Camera* _p_camera;          // pointer for camera object
+    String* _p_ccu_address;     // pointer for ccu address string
 
 public:
     Dashboard(
@@ -204,127 +194,143 @@ public:
         String* p_ccu_address,
         const char* apPassword = "defaultPW", 
         bool debug = false
-    ) : _server(80),
-        _ap_password(apPassword),
-        _debug_enabled(debug),
-        _p_temp_ambient(p_temp_ambient),
-        _p_humidity(p_humidity),
-        _p_light(p_light),
-        _p_temp_soil(p_temp_soil),
-        _p_moisture(p_moisture),
-        _p_ec(p_ec),
-        _p_camera(p_camera),
-        _p_ccu_address(p_ccu_address)
+    ) : _server(80), // initialize server on port 80
+        _ap_password(apPassword),        // set ap password from argument
+        _debug_enabled(debug),           // set debug mode from argument
+        _p_temp_ambient(p_temp_ambient), // store pointer to ambient temp
+        _p_humidity(p_humidity),         // store pointer to humidity
+        _p_light(p_light),               // store pointer to light
+        _p_temp_soil(p_temp_soil),       // store pointer to soil temp
+        _p_moisture(p_moisture),         // store pointer to moisture
+        _p_ec(p_ec),                     // store pointer to ec
+        _p_camera(p_camera),             // store pointer to camera
+        _p_ccu_address(p_ccu_address)    // store pointer to ccu address
     {}
 
     void begin() {
-        Serial.begin(115200);
-        if (_debug_enabled) Serial.println("\nFunction called: begin()");
+        Serial.begin(115200); // start serial communication
+        if (_debug_enabled) { Serial.println("\n[INFO] Function called: begin()"); } // log function call
 
-        String mac_address = WiFi.macAddress();
-        String mac_suffix = mac_address.substring(12, 14) + mac_address.substring(15, 17);
-        mac_suffix.toUpperCase();
-        _hostname = "ge-sd-" + mac_suffix;
+        String mac_address = WiFi.macAddress(); // get device mac address
+        String mac_suffix = mac_address.substring(12, 14) + mac_address.substring(15, 17); // get last 4 hex digits
+        mac_suffix.toUpperCase(); // convert to uppercase
+        _hostname = "ge-sd-" + mac_suffix; // create unique hostname
+        if (_debug_enabled) { Serial.print("[DEBUG] Hostname created: "); Serial.println(_hostname); }
 
-        _preferences.begin("wifi-creds", false);
+        _preferences.begin("wifi-creds", false); // initialize preferences storage
         
-        if (_p_ccu_address) {
-            *_p_ccu_address = _preferences.getString("ccu_address", "");
+        if (_p_ccu_address) { // if the ccu address pointer is valid
+            *_p_ccu_address = _preferences.getString("ccu_address", ""); // load saved ccu address
+            if (_debug_enabled) { Serial.print("[DEBUG] Loaded CCU address from NVS: "); Serial.println(*_p_ccu_address); }
         }
 
-        WiFi.mode(WIFI_AP_STA);
-        WiFi.softAP(_hostname.c_str(), _ap_password.c_str()); 
+        WiFi.mode(WIFI_AP_STA); // set wifi to both ap and station mode
+        WiFi.softAP(_hostname.c_str(), _ap_password.c_str()); // start the access point
         
-        IPAddress apIP = WiFi.softAPIP();
-        if (_debug_enabled) {
-            Serial.println("--- Access Point Started ---");
-            Serial.print("AP SSID: "); Serial.println(_hostname);
-            Serial.print("AP IP Address: "); Serial.println(apIP);
+        IPAddress apIP = WiFi.softAPIP(); // get the ap's ip address
+        if (_debug_enabled) { // if debug mode is on
+            Serial.println("--- Access Point Started ---"); // print ap status
+            Serial.print("[INFO] AP SSID: "); Serial.println(_hostname); // print ssid
+            Serial.print("[INFO] AP IP Address: "); Serial.println(apIP); // print ip address
             Serial.println("--------------------------");
         }
 
-        setupWebServer();
-        delay(100);
+        setupWebServer(); // configure web server routes
+        delay(100);       // short delay for stability
         
-        if (MDNS.begin(_hostname.c_str())) {
-            MDNS.addService("http", "tcp", 80);
-            if (_debug_enabled) {
-                Serial.print("Access the dashboard at: http://");
-                Serial.print(_hostname); Serial.println(".local");
+        if (MDNS.begin(_hostname.c_str())) { // start mDNS service with the hostname
+            MDNS.addService("http", "tcp", 80); // advertise web server on port 80
+            if (_debug_enabled) { // if debug mode is on
+                Serial.println("[INFO] mDNS responder started."); // log mDNS status
+                Serial.print("[INFO] Access dashboard at: http://");
+                Serial.print(_hostname);
+                Serial.println(".local");
             }
+        } else { // if mDNS fails
+             if (_debug_enabled) Serial.println("[ERROR] Error setting up mDNS responder!"); // log the error
         }
         
-        String saved_ssid = _preferences.getString("ssid", "");
-        if (saved_ssid != "") {
-            connectToWiFi();
-        } else {
-            if (_debug_enabled) Serial.println("No saved STA credentials.");
+        String saved_ssid = _preferences.getString("ssid", ""); // read saved ssid from storage
+        if (saved_ssid != "") { // if ssid exists
+            connectToWiFi(); // try to connect to the saved network
+        } else { // if no ssid is saved
+            if (_debug_enabled) Serial.println("[INFO] No saved STA credentials.");
         }
     }
 
-    void loop() { _server.handleClient(); }
-    bool isConnected() { return WiFi.status() == WL_CONNECTED; }
+    void loop() {
+        _server.handleClient(); // handle incoming web requests
+    }
+
+    bool isConnected() {
+        return WiFi.status() == WL_CONNECTED; // return true if connected to a wifi network
+    }
 
 private:
     void connectToWiFi() {
-        if (_debug_enabled) { Serial.println("Function called: connectToWiFi()"); } // log function call
+        if (_debug_enabled) { Serial.println("[INFO] Function called: connectToWiFi()"); } // log function call
         String ssid = _preferences.getString("ssid", ""); // get ssid from storage
         String password = _preferences.getString("password", ""); // get password from storage
-        if (_debug_enabled) { Serial.print("Attempting to connect to STA network: "); Serial.println(ssid); }
+        if (_debug_enabled) { Serial.print("[DEBUG] Attempting to connect to STA network: "); Serial.println(ssid); }
         WiFi.begin(ssid.c_str(), password.c_str()); // start connection attempt
     }
 
     void setupWebServer() {
-        if (_debug_enabled) Serial.println("Function called: setupWebServer()");
-        _server.on("/", HTTP_GET, std::bind(&Dashboard::handleRoot, this));
-        _server.on("/save", HTTP_POST, std::bind(&Dashboard::handleSave, this));
-        _server.on("/forget", HTTP_POST, std::bind(&Dashboard::handleForget, this));
-        _server.on("/dashboard", HTTP_GET, std::bind(&Dashboard::handleDashboard, this));
-        _server.on("/camera", HTTP_GET, std::bind(&Dashboard::handleCameraPage, this));
-        _server.on("/stream", HTTP_GET, std::bind(&Dashboard::handleStream, this));
-        _server.on("/save_ccu", HTTP_POST, std::bind(&Dashboard::handleSaveCcu, this));
-        _server.onNotFound([this]() { 
-            if (_debug_enabled) Serial.println("Function called: onNotFound");
-            _server.send(404, "text/plain", "404: Not Found"); 
+        if (_debug_enabled) { Serial.println("[INFO] Function called: setupWebServer()"); } // log function call
+        _server.on("/", HTTP_GET, std::bind(&Dashboard::handleRoot, this)); // route for root page
+        _server.on("/save", HTTP_POST, std::bind(&Dashboard::handleSave, this)); // route for saving wifi credentials
+        _server.on("/forget", HTTP_POST, std::bind(&Dashboard::handleForget, this)); // route for forgetting wifi credentials
+        _server.on("/dashboard", HTTP_GET, std::bind(&Dashboard::handleDashboard, this)); // route for sensor dashboard
+        _server.on("/camera", HTTP_GET, std::bind(&Dashboard::handleCameraPage, this)); // route for camera page
+        _server.on("/stream", HTTP_GET, std::bind(&Dashboard::handleStream, this)); // route for mjpeg stream
+        _server.on("/save_ccu", HTTP_POST, std::bind(&Dashboard::handleSaveCcu, this)); // route for saving ccu address
+
+        _server.onNotFound([this]() { // handler for any other page
+            if (_debug_enabled) { Serial.println("[WARN] Function called: onNotFound - Page not found."); } // log 404
+            _server.send(404, "text/plain", "404: Not Found"); // send 404 error
         });
-        _server.begin();
-        if (_debug_enabled) Serial.println("HTTP server started.");
+        _server.begin(); // start the web server
+        if (_debug_enabled) { Serial.println("[INFO] HTTP server started."); }
     }
 
     void handleRoot() {
-        if (_debug_enabled) Serial.println("Function called: handleRoot()");
-        String page_template = FPSTR(DASHBOARD_MAIN_TEMPLATE);
-        String page_content;
-        String title = "GreenEye 센서단말<br>[" + _hostname + "]";
-        page_template.replace("__DASHBOARD_TITLE__", title);
+        if (_debug_enabled) { Serial.println("[INFO] Function called: handleRoot()"); } // log function call
+        String page_template = FPSTR(DASHBOARD_MAIN_TEMPLATE); // load main template from flash
+        String page_content; // prepare string for page content
+        
+        String title = "GreenEye 센서단말<br>[" + _hostname + "]"; // create dynamic title
+        page_template.replace("__DASHBOARD_TITLE__", title); // replace title placeholder
 
-        if (isConnected()) {
-            page_content = FPSTR(DEVICE_STATUS_CONTENT);
-            String current_ssid = _preferences.getString("ssid", "N/A");
-            page_content.replace("__CURRENT_SSID__", current_ssid);
+        if (isConnected()) { // if connected to a router
+            if (_debug_enabled) { Serial.println("[DEBUG] Serving DEVICE_STATUS_CONTENT."); }
+            page_content = FPSTR(DEVICE_STATUS_CONTENT); // load status page content
+            String current_ssid = _preferences.getString("ssid", "N/A"); // get current ssid
+            page_content.replace("__CURRENT_SSID__", current_ssid); // replace ssid placeholder
             
-            String current_ccu = "Not Set";
-            if (_p_ccu_address && !(*_p_ccu_address).isEmpty()) {
-                current_ccu = *_p_ccu_address;
+            String current_ccu = "Not Set"; // default text for ccu address
+            if (_p_ccu_address && !(*_p_ccu_address).isEmpty()) { // if pointer is valid and string is not empty
+                current_ccu = *_p_ccu_address; // get value from pointer
             }
-            page_content.replace("__CURRENT_CCU_ADDRESS__", current_ccu);
+            page_content.replace("__CURRENT_CCU_ADDRESS__", current_ccu); // replace ccu placeholder
 
-        } else {
-            page_content = FPSTR(SETUP_FORM_CONTENT);
+        } else { // if not connected
+            if (_debug_enabled) { Serial.println("[DEBUG] Serving SETUP_FORM_CONTENT."); }
+            page_content = FPSTR(SETUP_FORM_CONTENT); // load setup form content
         }
 
-        page_template.replace("__PAGE_CONTENT__", page_content);
-        _server.send(200, "text/html", page_template);
+        page_template.replace("__PAGE_CONTENT__", page_content); // insert content into template
+        _server.send(200, "text/html", page_template); // send the final page
     }
 
     void handleDashboard() {
-        if (_debug_enabled) { Serial.println("Function called: handleDashboard()"); } // log function call
+        if (_debug_enabled) { Serial.println("[INFO] Function called: handleDashboard()"); } // log function call
         String page_template = FPSTR(DASHBOARD_MAIN_TEMPLATE); // load main template from flash
         String page_content = FPSTR(DASHBOARD_CONTENT); // load dashboard content from flash
 
         String title = "GreenEye 센서단말<br>[" + _hostname + "]"; // create dynamic title
         page_template.replace("__DASHBOARD_TITLE__", title); // replace title placeholder
         
+        if (_debug_enabled) { Serial.println("[DEBUG] Populating sensor data..."); }
         if (_p_temp_ambient) page_content.replace("__TEMP_AMBIENT__", String(*_p_temp_ambient, 1)); // update with sensor data
         if (_p_humidity)     page_content.replace("__HUMIDITY__",     String(*_p_humidity, 1));
         if (_p_light)        page_content.replace("__LIGHT__",        String(*_p_light, 1));
@@ -337,7 +343,7 @@ private:
     }
 
     void handleCameraPage() {
-        if (_debug_enabled) { Serial.println("Function called: handleCameraPage()"); } // log function call
+        if (_debug_enabled) { Serial.println("[INFO] Function called: handleCameraPage()"); } // log function call
         String page_template = FPSTR(DASHBOARD_MAIN_TEMPLATE); // load main template
         String page_content = FPSTR(CAMERA_CONTENT); // load camera page content
         String title = "GreenEye 센서단말<br>[" + _hostname + "]"; // create dynamic title
@@ -347,8 +353,9 @@ private:
     }
 
     void handleStream() {
-        if (_debug_enabled) { Serial.println("Function called: handleStream()"); } // log function call
+        if (_debug_enabled) { Serial.println("[INFO] Function called: handleStream()"); } // log function call
         if (!_p_camera) { // if camera pointer is invalid
+            if (_debug_enabled) { Serial.println("[ERROR] Stream failed: Camera not initialized."); }
             _server.send(503, "text/plain", "Camera not initialized"); // send error
             return;
         }
@@ -357,11 +364,12 @@ private:
         String response = "HTTP/1.1 200 OK\r\n"; // prepare http response header
         response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n"; // specify mjpeg content type
         _server.sendContent(response); // send the header
+        if (_debug_enabled) { Serial.println("[DEBUG] Stream started for client."); }
 
-        while (true) { // loop to send frames
+        while (client.connected()) { // loop to send frames
             camera_fb_t *fb = _p_camera->captureFrameForStream(); // capture a frame
             if (!fb) { // if capture fails
-                Serial.println("Camera capture failed");
+                if (_debug_enabled) { Serial.println("[ERROR] Camera capture failed during stream."); }
                 break; // exit the loop
             }
 
@@ -374,56 +382,54 @@ private:
             client.print("\r\n"); // empty line after content
 
             _p_camera->releaseFrameForStream(fb); // release the frame buffer
-
-            if (!client.connected()) { // if client disconnects
-                break; // exit the loop
-            }
         }
+        if (_debug_enabled) { Serial.println("[DEBUG] Stream ended for client."); }
     }
 
     void handleSaveCcu() {
-        if (_debug_enabled) Serial.println("Function called: handleSaveCcu()");
-        
-        String new_ccu_address = _server.arg("ccu_address");
-        if (_debug_enabled) { Serial.print("Saving new CCU address: "); Serial.println(new_ccu_address); }
+        if (_debug_enabled) { Serial.println("[INFO] Function called: handleSaveCcu()"); }
+        String new_ccu_address = _server.arg("ccu_address"); // get address from form
+        if (_debug_enabled) { Serial.print("[DEBUG] Received new CCU address: "); Serial.println(new_ccu_address); }
 
-        _preferences.putString("ccu_address", new_ccu_address);
+        _preferences.putString("ccu_address", new_ccu_address); // save to non-volatile storage
 
-        if (_p_ccu_address) {
-            *_p_ccu_address = new_ccu_address;
+        if (_p_ccu_address) { // if pointer is valid
+            *_p_ccu_address = new_ccu_address; // update the variable in the main sketch
         }
-
-        _server.send_P(200, "text/html", CCU_SAVE_SUCCESS_PAGE_HTML);
+        if (_debug_enabled) { Serial.println("[INFO] CCU address saved."); }
+        _server.send_P(200, "text/html", CCU_SAVE_SUCCESS_PAGE_HTML); // send confirmation page
     }
 
     void handleSave() {
-        if (_debug_enabled) Serial.println("Function called: handleSave()");
+        if (_debug_enabled) { Serial.println("[INFO] Function called: handleSave()"); } // log function call
         
-        // Save WiFi credentials
-        _preferences.putString("ssid", _server.arg("ssid"));
-        _preferences.putString("password", _server.arg("password"));
-        
-        // Also save the CCU address from the setup form
-        String new_ccu_address = _server.arg("ccu_address");
-        _preferences.putString("ccu_address", new_ccu_address);
-        if (_p_ccu_address) {
-            *_p_ccu_address = new_ccu_address;
+        String new_ssid = _server.arg("ssid"); // get ssid from form
+        String new_password = _server.arg("password"); // get password from form
+        String new_ccu_address = _server.arg("ccu_address"); // get ccu address from form
+
+        _preferences.putString("ssid", new_ssid); // save ssid to storage
+        _preferences.putString("password", new_password); // save password to storage
+        _preferences.putString("ccu_address", new_ccu_address); // save ccu address to storage
+        if (_p_ccu_address) { // if pointer is valid
+            *_p_ccu_address = new_ccu_address; // update main sketch variable
         }
         
         if (_debug_enabled) {
-            Serial.print("Saved SSID: "); Serial.println(_server.arg("ssid"));
-            Serial.print("Saved CCU Address: "); Serial.println(new_ccu_address);
+            Serial.print("[DEBUG] Saved SSID: "); Serial.println(new_ssid);
+            Serial.print("[DEBUG] Saved CCU Address: "); Serial.println(new_ccu_address);
+            Serial.println("[INFO] WiFi and CCU info saved. Restarting...");
         }
 
-        _server.send_P(200, "text/html", SUCCESS_PAGE_HTML);
-        delay(2000); 
-        ESP.restart();
+        _server.send_P(200, "text/html", SUCCESS_PAGE_HTML); // send success page
+        delay(2000); // wait for page to be sent
+        ESP.restart(); // restart the device
     }
 
     void handleForget() {
-        if (_debug_enabled) { Serial.println("Function called: handleForget()"); } // log function call
+        if (_debug_enabled) { Serial.println("[INFO] Function called: handleForget()"); } // log function call
         _preferences.clear(); // clear all saved credentials
         MDNS.end(); // stop mDNS service
+        if (_debug_enabled) { Serial.println("[INFO] All preferences cleared. Restarting..."); }
         _server.send_P(200, "text/html", FORGET_SUCCESS_PAGE_HTML); // send forgotten page
         delay(2000); // wait for page to be sent
         ESP.restart(); // restart the device
