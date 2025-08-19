@@ -5,10 +5,21 @@
 #include "MQTT.h"         // include the mqtt client class
 #include <Preferences.h>  // include for using the setup mode flag
 
-// pin for entering Setup Mode
+// === Main Debug Switch ===
+#define MAIN_DEBUG 1 // set to 1 to enable detailed logs from this file, 0 to disable
+
+#if MAIN_DEBUG == 1
+  #define DEBUG_MAIN_PRINT(x) Serial.print(x)
+  #define DEBUG_MAIN_PRINTLN(x) Serial.println(x)
+#else
+  #define DEBUG_MAIN_PRINT(x)
+  #define DEBUG_MAIN_PRINTLN(x)
+#endif
+
+// --- Pin for entering Setup Mode ---
 #define SETUP_BUTTON_PIN 0 // IO0 pin is used to enter setup mode
 
-// global variables & objects 
+// --- Global Variables & Objects ---
 RTC_DATA_ATTR int bootCount = 0; // a counter that survives deep sleep
 
 int   battery_level    = 0;    // holds the battery level percentage
@@ -42,21 +53,20 @@ Dashboard dashboard(           // create the dashboard object
     &soil_ec,
     &camera,
     &ccu_address,
-    "defaultPW", // access Point Password
-    true         // debug Mode (true = ON, false = OFF)
+    "defaultPW", // Access Point Password
+    true         // set library debug mode to ON
 );
 Preferences preferences;       // create the preferences object for the flag
 
-// Global flag for current mode
+// --- Global flag for current mode ---
 bool isSetupMode = false; // flag to determine the current operating mode
 const unsigned long SETUP_MODE_TIMEOUT = 10 * 60 * 1000; // 10 minutes timeout for setup mode
 
-// MQTT Event Handler Functions
+// --- MQTT Event Handler Functions ---
 
-// this function sends all current sensor data via mqtt
 void sendSensorData() {
     if (!dashboard.isConnected()) { // check if connected to wifi
-        Serial.println("Not connected to WiFi, cannot send data.");
+        DEBUG_MAIN_PRINTLN("[WARN] Not connected to WiFi, cannot send data.");
         return; // exit if not connected
     }
     JsonDocument dataDoc; // create a json document
@@ -72,12 +82,12 @@ void sendSensorData() {
     mqtt.publishData(output);       // publish the data
 }
 
-// this function sends a captured image via mqtt
 void sendCameraData() {
     if (!dashboard.isConnected()) return; // exit if not connected
-    Serial.println("Capturing high quality frame to send...");
+    DEBUG_MAIN_PRINTLN("[ACTION] Capturing high quality frame to send...");
     camera_fb_t* fb = camera.captureFrameForAnalyze(); // capture a high quality frame
     if (fb) { // if frame capture was successful
+        DEBUG_MAIN_PRINTLN("[DEBUG] Frame captured successfully.");
         JsonDocument dataDoc; // create json document
         // note: for actual use, the frame buffer (fb->buf) should be Base64 encoded here
         dataDoc["plant_img"] = "base64-encoded-image-placeholder"; 
@@ -86,25 +96,22 @@ void sendCameraData() {
         mqtt.publishData(output); // publish the image data
         camera.releaseFrame(fb); // release the frame buffer
     } else {
-        Serial.println("Failed to capture high quality frame for sending.");
+        DEBUG_MAIN_PRINTLN("[ERROR] Failed to capture high quality frame for sending.");
     }
 }
 
-// this function is called when the ccu requests data
 void handleDataRequest() {
-    Serial.println("Data request received from CCU.");
-    sensors.readAllSensors(); // read all sensor values first
-    sendSensorData();       // then send the new data
+    DEBUG_MAIN_PRINTLN("[MQTT] Data request received from CCU.");
+    sendSensorData(); // send sensor data in response
 }
 
-// this function is called when the ccu sends new configurations
 void handleConfig(JsonDocument& doc, PowerManager& pm) {
-    Serial.println("Config received from CCU.");
-    if (doc.containsKey("pwr_mode")) { // check if power mode is being set
-        char pwr_mode = doc["pwr_mode"].as<char>(); // get the character value
-        pm.setMode(pwr_mode); // set the new power mode
+    DEBUG_MAIN_PRINTLN("[MQTT] Config received from CCU.");
+    if (!doc["pwr_mode"].isNull()) { // if the json contains 'pwr_mode'
+        const char* pwr_mode_str = doc["pwr_mode"]; // get the value as a string
+        pm.setMode(pwr_mode_str[0]); // use the first character to set the mode
     }
-    if (doc.containsKey("nht_mode")) { // check if night mode is being set
+    if (!doc["nht_mode"].isNull()) { // if the json contains 'nht_mode'
         bool nht_mode = doc["nht_mode"].as<bool>(); // get the boolean value
         pm.setNightMode(nht_mode); // set the new night mode
     }
@@ -114,7 +121,7 @@ void setup() {
   Serial.begin(115200); // initialize serial communication
   delay(1000); // wait for serial monitor to open
   bootCount++; // increment the deep sleep wake-up counter
-  Serial.printf("\n--- Boot count: %d ---\n", bootCount);
+  DEBUG_MAIN_PRINT("[INFO] === Boot count: "); DEBUG_MAIN_PRINT(bootCount); DEBUG_MAIN_PRINTLN(" ===");
 
   pinMode(SETUP_BUTTON_PIN, INPUT); // set up the mode selection button pin
   preferences.begin("device-state", false); // initialize preferences for the mode flag
@@ -131,13 +138,13 @@ void setup() {
 
   // initialize subsystems based on the selected mode
   if (isSetupMode) {
-    Serial.println("SETUP MODE ACTIVATED.");
-    if(!camera.begin()){ Serial.println("Failed to start camera"); } // initialize camera
+    DEBUG_MAIN_PRINTLN("[MODE] SETUP MODE ACTIVATED.");
+    if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
     dashboard.begin(); // initialize dashboard (web server)
   } else {
-    Serial.println("NORMAL MODE ACTIVATED.");
+    DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED.");
     sensors.begin(); // initialize sensors
-    if(!camera.begin()){ Serial.println("Failed to start camera"); } // initialize camera
+    if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
     dashboard.begin(); // begin dashboard to load wifi/ccu settings and connect
     mqtt.onDataRequest(handleDataRequest); // register the data request callback
     mqtt.onConfig(handleConfig);           // register the config callback
@@ -149,22 +156,36 @@ void loop() {
   if (isSetupMode) {
     // --- Setup Mode Loop ---
     dashboard.loop(); // continuously handle web server requests
+
+    // check for button press to exit setup mode
+    static unsigned long buttonPressStartTime = 0;
+    bool buttonPressed = (digitalRead(SETUP_BUTTON_PIN) == HIGH);
+    if (buttonPressed) {
+      if (buttonPressStartTime == 0) { buttonPressStartTime = millis(); } 
+      else if (millis() - buttonPressStartTime > 3000) {
+        DEBUG_MAIN_PRINTLN("[ACTION] Exiting Setup mode via button press. Restarting...");
+        ESP.restart();
+      }
+    } else {
+      buttonPressStartTime = 0;
+    }
+
     if (millis() > SETUP_MODE_TIMEOUT) { // check for the 10-minute timeout
-      Serial.println("Setup mode timed out. Restarting...");
+      DEBUG_MAIN_PRINTLN("[WARN] Setup mode timed out. Restarting...");
       ESP.restart(); // reboot into normal mode
     }
   } else {
     // --- Normal Mode: Connect, Sense, Transmit, Sleep ---
-    Serial.println("Connecting to WiFi...");
+    DEBUG_MAIN_PRINTLN("[ACTION] Connecting to WiFi...");
     int connection_timeout = 20; // ~10 seconds
     while (WiFi.status() != WL_CONNECTED && connection_timeout > 0) { // wait for wifi connection
       delay(500);
-      Serial.print(".");
+      DEBUG_MAIN_PRINT(".");
       connection_timeout--;
     }
 
     if (WiFi.status() == WL_CONNECTED) { // if wifi connected successfully
-      Serial.println("\nWiFi Connected.");
+      DEBUG_MAIN_PRINTLN("\n[INFO] WiFi Connected.");
       mqtt.loop(); // connect to mqtt and process any initial messages
       
       sensors.readAllSensors(); // read all sensor values
@@ -179,13 +200,13 @@ void loop() {
             sendCameraData(); // capture and send the photo
         }
       }
-      delay(1000); // wait for data to be sent before sleeping
+      delay(2000); // wait for data to be sent before sleeping
     } else {
-      Serial.println("\nFailed to connect to WiFi.");
+      DEBUG_MAIN_PRINTLN("\n[ERROR] Failed to connect to WiFi.");
     }
 
     unsigned long sleep_duration_seconds = powerManager.getSenseInterval(); // get the sleep duration
-    Serial.printf("Entering deep sleep for %lu seconds.\n", sleep_duration_seconds);
+    DEBUG_MAIN_PRINT("[ACTION] Entering deep sleep for "); DEBUG_MAIN_PRINT(sleep_duration_seconds); DEBUG_MAIN_PRINTLN(" seconds.");
     esp_sleep_enable_timer_wakeup(sleep_duration_seconds * 1000000ULL); // set the wakeup timer
     esp_deep_sleep_start(); // enter deep sleep
   }
