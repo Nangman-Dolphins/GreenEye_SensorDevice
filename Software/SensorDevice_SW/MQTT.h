@@ -17,50 +17,54 @@ private:
     String* _p_ccu_address;      // pointer to the ccu address string
     String _device_id;           // this device's id (mac suffix)
     PowerManager* _p_power_manager; // pointer to the power manager object
+    bool _debug_enabled = false; // flag for controlling debug prints
 
-    // callback function pointers
-    DataRequestCallback _dataRequestCallback;
-    ConfigCallback _configCallback;
+    DataRequestCallback _dataRequestCallback; // pointer to the data request callback function
+    ConfigCallback _configCallback;           // pointer to the config callback function
 
-    // mqtt topics
-    String _dataTopic;
-    String _reqTopic;
-    String _confTopic;
+    String _dataTopic;          // topic for publishing data
+    String _reqTopic;           // topic for subscribing to requests
+    String _confTopic;          // topic for subscribing to configs
+    String _last_ccu_address;   // stores the last known ccu address
 
-    // internal reconnect logic
-    void reconnect() {
+    void reconnect() { // handles mqtt reconnection logic
         while (!_mqttClient.connected()) { // loop until we're reconnected
-            Serial.print("Attempting MQTT connection...");
-            if (*_p_ccu_address == "") { // if ccu address is not set
-                Serial.println(" CCU address not set. Retrying in 5 seconds...");
+            if (_debug_enabled) { Serial.print("Attempting MQTT connection..."); }
+            if ((*_p_ccu_address).isEmpty()) { // if ccu address is not set
+                if (_debug_enabled) { Serial.println(" CCU address not set. Retrying in 5 seconds..."); }
                 delay(5000); // wait and retry
-                continue; // skip the rest of the loop
+                continue;    // skip the rest of the loop
             }
 
             if (_mqttClient.connect(_device_id.c_str())) { // attempt to connect
-                Serial.println("connected");
-                _mqttClient.subscribe(_reqTopic.c_str()); // subscribe to request topic
-                _mqttClient.subscribe(_confTopic.c_str()); // subscribe to config topic
-                Serial.println("Subscribed to topics: ");
-                Serial.println(_reqTopic);
-                Serial.println(_confTopic);
+                if (_debug_enabled) { Serial.println("connected"); }
+                _mqttClient.subscribe(_reqTopic.c_str());    // subscribe to request topic
+                _mqttClient.subscribe(_confTopic.c_str());    // subscribe to config topic
+                if (_debug_enabled) { // if debug is on
+                    Serial.println("Subscribed to topics: ");
+                    Serial.println(_reqTopic);
+                    Serial.println(_confTopic);
+                }
             } else { // if connection failed
-                Serial.print("failed, rc=");
-                Serial.print(_mqttClient.state());
-                Serial.println(" try again in 5 seconds");
+                if (_debug_enabled) {
+                    Serial.print("failed, rc=");
+                    Serial.print(_mqttClient.state());
+                    Serial.println(" try again in 5 seconds");
+                }
                 delay(5000); // wait 5 seconds before retrying
             }
         }
     }
 
-    // internal callback that receives all messages and decides what to do
-    void internalCallback(char* topic, byte* payload, unsigned int length) {
+    void internalCallback(char* topic, byte* payload, unsigned int length) { // receives all messages from broker
         String topicStr = String(topic); // convert topic to string
         
-        if (_debug_enabled) { // use a local debug flag for clarity
+        if (_debug_enabled) { // print received message if debug is on
+            String payloadStr;
+            for (int i=0; i<length; i++) { payloadStr += (char)payload[i]; }
             Serial.println("-----------");
-            Serial.print("Message arrived on topic: ");
-            Serial.println(topicStr);
+            Serial.print("Message arrived on topic: "); Serial.println(topicStr);
+            Serial.print("Payload: "); Serial.println(payloadStr);
             Serial.println("-----------");
         }
         
@@ -75,17 +79,14 @@ private:
             }
         }
     }
-    
-    bool _debug_enabled = false; // internal debug flag
 
 public:
-    // constructor now takes a pointer to a PowerManager object
     MQTTClient(String* p_ccu_address, PowerManager* p_power_manager) 
-        :   _p_ccu_address(p_ccu_address),
-            _p_power_manager(p_power_manager),
-            _dataRequestCallback(nullptr),
-            _configCallback(nullptr),
-            _mqttClient(_wifiClient)
+        : _p_ccu_address(p_ccu_address),          // store pointer to ccu address
+          _p_power_manager(p_power_manager),      // store pointer to power manager
+          _dataRequestCallback(nullptr),          // initialize callback to null
+          _configCallback(nullptr),               // initialize callback to null
+          _mqttClient(_wifiClient)                // initialize pubsubclient with wifi client
     {
         String mac = WiFi.macAddress(); // get the mac address
         _device_id = mac.substring(12, 14) + mac.substring(15, 17); // get last 4 hex digits
@@ -102,31 +103,31 @@ public:
         });
     }
 
-    // set the function to be called when a data request arrives
-    void onDataRequest(DataRequestCallback callback) {
+    void onDataRequest(DataRequestCallback callback) { // sets the function to be called when a data request arrives
         _dataRequestCallback = callback;
     }
 
-    // set the function to be called when a config message arrives
-    void onConfig(ConfigCallback callback) {
+    void onConfig(ConfigCallback callback) { // sets the function to be called when a config message arrives
         _configCallback = callback;
     }
     
-    // sets the mqtt server and port
-    void begin() {
-        if (*_p_ccu_address != "") { // if ccu address is available
+    void begin() { // sets the mqtt server and port
+        if (!(*_p_ccu_address).isEmpty()) { // if ccu address is available
             _mqttClient.setServer((*_p_ccu_address).c_str(), 1883); // set the mqtt server
+            _last_ccu_address = *_p_ccu_address; // store it as the last known address
         }
     }
 
-    // must be called in the main loop()
-    void loop() {
-        if (*_p_ccu_address == "") return; // do nothing if ccu address is not set
+    void loop() { // must be called in the main loop()
+        if ((*_p_ccu_address).isEmpty()) return; // do nothing if ccu address is not set
 
-        // if the server address has changed in the dashboard
-        if (strcmp(_mqttClient.getServer(), (*_p_ccu_address).c_str()) != 0) {
+        if (*_p_ccu_address != _last_ccu_address) { // if the server address has changed in the dashboard
+            if (_debug_enabled) { Serial.println("CCU address has changed. Reconfiguring MQTT client."); }
             _mqttClient.setServer((*_p_ccu_address).c_str(), 1883); // update the server address
-             if (_mqttClient.connected()) _mqttClient.disconnect(); // disconnect from the old server
+            _last_ccu_address = *_p_ccu_address; // save the new address
+            if (_mqttClient.connected()) { // if connected to the old server
+                _mqttClient.disconnect(); // disconnect to force a reconnect to the new server
+            }
         }
 
         if (!_mqttClient.connected()) { // if not connected
@@ -135,28 +136,27 @@ public:
         _mqttClient.loop(); // process incoming messages and maintain connection
     }
 
-    // publishes sensor data to the data topic
-    void publishData(const String& jsonPayload) {
+    void publishData(const String& jsonPayload) { // publishes sensor data to the data topic
         if (_mqttClient.connected()) { // if connected
             if (_debug_enabled) {
-                Serial.print("Publishing message to ");
-                Serial.println(_dataTopic);
+              Serial.print("Publishing message to ");
+              Serial.println(_dataTopic);
             }
             _mqttClient.publish(_dataTopic.c_str(), jsonPayload.c_str()); // publish the message
         } else {
-            if (_debug_enabled) Serial.println("Cannot publish, MQTT client not connected.");
+            if (_debug_enabled) { Serial.println("Cannot publish, MQTT client not connected."); }
         }
     }
 
-    bool isConnected() {
-        return _mqttClient.connected(); // return the connection status
+    bool isConnected() { // returns the connection status
+        return _mqttClient.connected();
     }
     
-    void setDebug(bool debug) {
-        _debug_enabled = debug; // enable or disable debug prints
+    void setDebug(bool debug) { // enables or disables debug prints
+        _debug_enabled = debug;
     }
 
-    String getDeviceId() {
-        return _device_id; // return the generated device id
+    String getDeviceId() { // returns the generated device id
+        return _device_id;
     }
 };
