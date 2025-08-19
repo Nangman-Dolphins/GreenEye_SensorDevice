@@ -1,47 +1,74 @@
 #pragma once // prevents multiple inclusion of the header file
+#include <Preferences.h> // for non-volatile storage
 
-enum PowerMode {
-    ULTRA_LOW_POWER,
-    LOW_POWER,
-    NORMAL,
-    HIGH_FREQ,
-    ULTRA_HIGH_FREQ
+enum PowerMode { // defines the available power modes
+    ULTRA_LOW_POWER, // z
+    LOW_POWER,       // l
+    NORMAL,          // m
+    HIGH_FREQ,       // h
+    ULTRA_HIGH_FREQ  // u
 };
 
 class PowerManager {
 private:
-    PowerMode _currentMode;
-    bool _nightModeEnabled;
-    unsigned long _senseInterval;
-    unsigned long _camInterval;
+    PowerMode _currentMode;     // holds the current power mode
+    bool _nightModeEnabled;     // flag for night deep sleep mode
+    unsigned long _senseInterval; // interval for sensor reading in seconds
+    unsigned long _camInterval;   // interval for camera capture in seconds
+    Preferences _preferences;   // non-volatile storage handler
 
-    void updateIntervals() {
+    void updateIntervals() { // updates the intervals based on the current mode
         switch (_currentMode) {
             case ULTRA_LOW_POWER: _senseInterval = 2 * 3600; _camInterval = 4 * 3600; break;
             case LOW_POWER:       _senseInterval = 1 * 3600; _camInterval = 2 * 3600; break;
             case NORMAL:          _senseInterval = 30 * 60;  _camInterval = 1 * 3600; break;
-            case HIGH_FREQ:       _senseInterval = 15 * 60;  _camInterval = 1 * 3600; break;
-            case ULTRA_HIGH_FREQ: _senseInterval = 10 * 60;  _camInterval = 30 * 60;  break;
+            case HIGH_FREQ:       _senseInterval = 20 * 60;  _camInterval = 1 * 3600; break;
+            case ULTRA_HIGH_FREQ: _senseInterval = 20 * 60;  _camInterval = 40 * 60;  break;
+        }
+        if (Serial) { // check if serial is initialized
+            Serial.printf("[PM] Mode updated. Sense interval: %lu s, Cam interval: %lu s\n", _senseInterval, _camInterval);
         }
     }
 
 public:
     PowerManager() : 
-        _currentMode(NORMAL),
-        _nightModeEnabled(true)
-    {
-        updateIntervals();
+        _currentMode(NORMAL),        // set default power mode
+        _nightModeEnabled(true)      // enable night mode by default
+    {}
+
+    void begin() { // loads saved settings from non-volatile storage
+        _preferences.begin("power-mgmt", false); // initialize preferences with a namespace
+        char savedMode = _preferences.getChar("pwr_mode", 'M'); // load saved mode, default to 'm'
+        _nightModeEnabled = _preferences.getBool("nht_mode", true); // load night mode setting, default to true
+        setMode(savedMode); // apply the loaded or default mode
     }
 
-    void setMode(PowerMode newMode) { _currentMode = newMode; updateIntervals(); }
-    void setMode(char modeChar) {
-        if (modeChar == 'Z') setMode(ULTRA_LOW_POWER);
-        else if (modeChar == 'L') setMode(LOW_POWER);
-        else if (modeChar == 'M') setMode(NORMAL);
-        else if (modeChar == 'H') setMode(HIGH_FREQ);
-        else if (modeChar == 'U') setMode(ULTRA_HIGH_FREQ);
+    void setMode(PowerMode newMode) { // sets a new power mode
+        _currentMode = newMode; // update the internal mode
+        updateIntervals(); // update the timing intervals
     }
-    void setNightMode(bool enabled) { _nightModeEnabled = enabled; }
-    unsigned long getSenseInterval() { return _senseInterval; }
-    unsigned long getCamInterval() { return _camInterval; }
+
+    void setMode(char modeChar) { // sets a new power mode using a character
+        PowerMode newMode = _currentMode; // default to current mode
+        if (modeChar == 'Z') newMode = ULTRA_LOW_POWER;
+        else if (modeChar == 'L') newMode = LOW_POWER;
+        else if (modeChar == 'M') newMode = NORMAL;
+        else if (modeChar == 'H') newMode = HIGH_FREQ;
+        else if (modeChar == 'U') newMode = ULTRA_HIGH_FREQ;
+        
+        if (newMode != _currentMode) { // if the mode actually changed
+            setMode(newMode); // call the main setMode function
+            _preferences.putChar("pwr_mode", modeChar); // save the new mode to storage
+        }
+    }
+    
+    void setNightMode(bool enabled) { // enables or disables night mode
+        _nightModeEnabled = enabled; // update the internal flag
+        _preferences.putBool("nht_mode", enabled); // save the setting to storage
+        if (Serial) { Serial.printf("[PM] Night mode set to: %s and saved.\n", enabled ? "ON" : "OFF"); }
+    }
+
+    unsigned long getSenseInterval() { return _senseInterval; } // returns the current sensor interval
+    unsigned long getCamInterval() { return _camInterval; }   // returns the current camera interval
+    bool isNightModeEnabled() { return _nightModeEnabled; }    // returns if night mode is enabled
 };
