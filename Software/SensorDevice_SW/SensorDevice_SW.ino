@@ -31,7 +31,7 @@ float soil_moisture    = 0.0; // holds soil moisture
 float soil_ec          = 0.0; // holds soil electrical conductivity
 String ccu_address     = "";   // holds the ccu address
 
-PowerManager powerManager; // create the power manager object
+PowerManager powerManager(MAIN_DEBUG); // create the power manager object
 Camera camera;                 // create the camera object
 SensorIO sensors(              // create the sensor io object
     &battery_level,
@@ -41,12 +41,12 @@ SensorIO sensors(              // create the sensor io object
     &soil_temp,
     &soil_moisture,
     &soil_ec,
-    true
+    MAIN_DEBUG
 );
 MQTTClient mqtt(                // create the mqtt client object
   &ccu_address,
   &powerManager,
-  true
+  MAIN_DEBUG
 );
 Dashboard dashboard(           // create the dashboard object
     &battery_level,
@@ -59,7 +59,7 @@ Dashboard dashboard(           // create the dashboard object
     &camera,
     &ccu_address,
     "defaultPW",                // Access Point Password
-    true
+    MAIN_DEBUG
 );
 Preferences preferences;       // create the preferences object for the flag
 
@@ -148,21 +148,37 @@ void setup() {
   Serial.begin(115200); // initialize serial communication
   delay(1000); // wait for serial monitor to open
 
+  pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
+
+  DEBUG_MAIN_PRINTLN("[INFO] Waiting 2 seconds for IO0 pin to stabilize...");
+  delay(2000);
+
   bootCount++; // increment the deep sleep wake-up counter
   DEBUG_MAIN_PRINT("[INFO] === Boot count: ");
   DEBUG_MAIN_PRINT(bootCount); DEBUG_MAIN_PRINTLN(" ===");
 
-  pinMode(SETUP_BUTTON_PIN, INPUT); // set up the mode selection button pin
   preferences.begin("device-state", false); // initialize preferences for the mode flag
-
+  powerManager.begin();
+ 
   handleWakeupReason(); // check why the device woke up
 
   bool enter_setup_flag = preferences.getBool("setup_mode", false); // check if the flag is set
-  powerManager.begin();
 
   if (enter_setup_flag) { // if the flag was set before rebooting
+    DEBUG_MAIN_PRINTLN("[DEBUG] SETUP MODE FLAG is HIGH.");
     isSetupMode = true; // enter setup mode
     preferences.putBool("setup_mode", false); // clear the flag for the next boot
+  }
+
+  if (digitalRead(SETUP_BUTTON_PIN) == LOW) {
+    if (MAIN_DEBUG) {
+      Serial.println("[INFO] IO0 pin is LOW. Waiting for it to go HIGH to start Normal Mode...");
+    }
+    while(digitalRead(SETUP_BUTTON_PIN) == LOW) {
+      delay(100);
+      if (MAIN_DEBUG) Serial.print(".");
+    }
+    if (MAIN_DEBUG) Serial.println("\n[INFO] IO0 is now HIGH. Continuing boot.");
   }
 
   // initialize subsystems based on the selected mode
@@ -175,9 +191,9 @@ void setup() {
     DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED.");
     sensors.begin(); // initialize sensors
     if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
-    dashboard.beginWiFi();
+    dashboard.beginWiFi(); 
     DEBUG_MAIN_PRINT("[ACTION] Connecting to WiFi in setup");
-    int connection_timeout = 60; // wait for ~30 seconds
+    int connection_timeout = 30; // wait for ~15 seconds
     while (WiFi.status() != WL_CONNECTED && connection_timeout > 0) {
         delay(500);
         DEBUG_MAIN_PRINT(".");
@@ -194,6 +210,8 @@ void setup() {
         DEBUG_MAIN_PRINTLN("\n[WARN] WiFi connection failed in setup.");
     }
   }
+
+  pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
 }
 
 void loop() {
@@ -203,7 +221,7 @@ void loop() {
 
     // check for a long button press to exit setup mode
     static unsigned long buttonPressStartTime = 0;
-    bool buttonPressed = (digitalRead(SETUP_BUTTON_PIN) == HIGH);
+    bool buttonPressed = (digitalRead(SETUP_BUTTON_PIN) == LOW);
     if (buttonPressed) {
       DEBUG_MAIN_PRINTLN("[DEBUG] button press detected!");
       if (buttonPressStartTime == 0) { buttonPressStartTime = millis(); }
@@ -226,8 +244,8 @@ void loop() {
       DEBUG_MAIN_PRINTLN("[INFO] WiFi Connected.");
       mqtt.loop(); // connect to mqtt and process any initial messages
 
-      sensors.readAllSensors(); // read all sensor values
-      sendSensorData(); // send the sensor data via mqtt
+      //sensors.readAllSensors(); // read all sensor values
+      //sendSensorData(); // send the sensor data via mqtt
 
       // check if it's time to capture and send a photo
       unsigned long sense_interval = powerManager.getSenseInterval();
@@ -235,7 +253,7 @@ void loop() {
       if (cam_interval > 0 && sense_interval > 0) { // prevent division by zero
         int sense_cycles_per_cam = cam_interval / sense_interval; // calculate how many sensor cycles per camera cycle
         if (bootCount % sense_cycles_per_cam == 0) { // if it's time for a photo
-            sendCameraData(); // capture and send the photo
+            //sendCameraData(); // capture and send the photo
         }
       }
       delay(2000); // wait for data to be sent before sleeping
@@ -250,8 +268,9 @@ void loop() {
 
     // configure wakeup sources
     esp_sleep_enable_timer_wakeup(sleep_duration_seconds * 1000000ULL); // set the wakeup timer
-    esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 1); // enable wakeup on button press (HIGH level)
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0); // enable wakeup on button press
 
     esp_deep_sleep_start(); // enter deep sleep
   }
+
 }
