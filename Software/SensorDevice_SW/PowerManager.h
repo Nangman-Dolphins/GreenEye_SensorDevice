@@ -33,12 +33,13 @@ private:
     }
 
 public:
-    // --- [MODIFIED] Constructor now accepts a debug flag ---
     PowerManager(bool debug = false) : 
         _currentMode(NORMAL),        // set default power mode
         _nightModeEnabled(true),     // enable night mode by default
         _debug_enabled(debug)        // set debug mode from argument
-    {}
+    {
+        updateIntervals(); // set initial intervals for the default mode
+    }
 
     void begin() { // loads saved settings from non-volatile storage
         _preferences.begin("power-mgmt", false); // initialize preferences with a namespace
@@ -50,6 +51,7 @@ public:
 
     void setMode(PowerMode newMode) { // sets a new power mode
         _currentMode = newMode; // update the internal mode
+        if (_debug_enabled) { Serial.print("[PM] Set Mode to "); Serial.println(_currentMode); }
         updateIntervals(); // update the timing intervals
     }
 
