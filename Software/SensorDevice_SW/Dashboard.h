@@ -247,6 +247,41 @@ public:
         }
     }
 
+    void beginWiFi(bool connect_sta = true) {
+        if (_debug_enabled) { Serial.println("[Dashboard] Initializing WiFi..."); }
+
+        // --- Previously in begin() ---
+        String mac_address = WiFi.macAddress();
+        String mac_suffix = mac_address.substring(12, 14) + mac_address.substring(15, 17);
+        mac_suffix.toUpperCase();
+        _hostname = "ge-sd-" + mac_suffix;
+        _preferences.begin("wifi-creds", false);
+        if (_p_ccu_address) {
+            *_p_ccu_address = _preferences.getString("ccu_address", "");
+        }
+        WiFi.mode(WIFI_AP_STA);
+        WiFi.softAP(_hostname.c_str(), _ap_password.c_str()); 
+        // --- End of previously in begin() ---
+
+        String saved_ssid = _preferences.getString("ssid", "");
+        if (connect_sta && saved_ssid != "") {
+            connectToWiFi();
+        }
+    }
+
+
+    void beginWebServer() {
+        if (_debug_enabled) { Serial.println("[Dashboard] Initializing Web Server..."); }
+        setupWebServer();
+        delay(100);
+        if (MDNS.begin(_hostname.c_str())) {
+            MDNS.addService("http", "tcp", 80);
+            if (_debug_enabled) { Serial.println("[Dashboard] mDNS responder started."); }
+        } else { 
+            if (_debug_enabled) { Serial.println("[Dashboard][ERROR] Error setting up mDNS responder!"); }
+        }
+    }
+
     void loop() {
         _server.handleClient(); // handle incoming web requests
     }
