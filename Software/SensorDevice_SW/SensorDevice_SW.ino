@@ -127,6 +127,7 @@ void setup() {
   pinMode(SETUP_BUTTON_PIN, INPUT); // set up the mode selection button pin
   preferences.begin("device-state", false); // initialize preferences for the mode flag
   bool enter_setup_flag = preferences.getBool("setup_mode", false); // check if the flag is set
+  powerManager.begin();
 
   if (enter_setup_flag) { // if the flag was set before rebooting
     isSetupMode = true; // enter setup mode
@@ -137,15 +138,31 @@ void setup() {
   if (isSetupMode) {
     DEBUG_MAIN_PRINTLN("[MODE] SETUP MODE ACTIVATED.");
     if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
-    dashboard.begin(); // initialize dashboard (web server)
+    dashboard.beginWiFi();
+    dashboard.beginWebServer(); // initialize dashboard (web server)
   } else {
     DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED.");
     sensors.begin(); // initialize sensors
     if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
-    dashboard.begin(); // begin dashboard to load wifi/ccu settings and connect
-    mqtt.onDataRequest(handleDataRequest); // register the data request callback
-    mqtt.onConfig(handleConfig);           // register the config callback
-    mqtt.begin(); // initialize mqtt client
+    dashboard.beginWiFi();
+
+    DEBUG_MAIN_PRINT("[ACTION] Connecting to WiFi in setup");
+    int connection_timeout = 60; // wait for ~30 seconds
+    while (WiFi.status() != WL_CONNECTED && connection_timeout > 0) {
+        delay(500);
+        DEBUG_MAIN_PRINT(".");
+        connection_timeout--;
+    }
+
+    // Initialize MQTT only if WiFi is connected
+    if (WiFi.status() == WL_CONNECTED) {
+        DEBUG_MAIN_PRINTLN("\n[INFO] WiFi connected successfully in setup.");
+        mqtt.onDataRequest(handleDataRequest); // register the data request callback
+        mqtt.onConfig(handleConfig); // register the config callback
+        mqtt.begin(); // initialize mqtt client
+    } else {
+        DEBUG_MAIN_PRINTLN("\n[WARN] WiFi connection failed in setup.");
+    }
   }
 }
 
@@ -173,17 +190,10 @@ void loop() {
       ESP.restart(); // reboot into normal mode
     }
   } else {
-    // --- Normal Mode: Connect, Sense, Transmit, Sleep ---
-    DEBUG_MAIN_PRINTLN("[ACTION] Connecting to WiFi...");
-    int connection_timeout = 40; // ~20 seconds
-    while (WiFi.status() != WL_CONNECTED && connection_timeout > 0) { // wait for wifi connection
-      delay(500);
-      DEBUG_MAIN_PRINT(".");
-      connection_timeout--;
-    }
+    // --- Normal Mode: Sense, Transmit, Sleep ---
 
     if (WiFi.status() == WL_CONNECTED) { // if wifi connected successfully
-      DEBUG_MAIN_PRINTLN("\n[INFO] WiFi Connected.");
+      DEBUG_MAIN_PRINTLN("[INFO] WiFi Connected.");
       mqtt.loop(); // connect to mqtt and process any initial messages
       
       sensors.readAllSensors(); // read all sensor values
@@ -201,6 +211,7 @@ void loop() {
       delay(2000); // wait for data to be sent before sleeping
     } else {
       DEBUG_MAIN_PRINTLN("\n[ERROR] Failed to connect to WiFi.");
+      preferences.putBool("setup_mode", true);
     }
 
     unsigned long sleep_duration_seconds = powerManager.getSenseInterval(); // get the sleep duration
