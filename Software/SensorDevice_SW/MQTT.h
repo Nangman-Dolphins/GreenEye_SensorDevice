@@ -81,12 +81,13 @@ private:
     }
 
 public:
-    MQTTClient(String* p_ccu_address, PowerManager* p_power_manager) 
+    MQTTClient(String* p_ccu_address, PowerManager* p_power_manager, bool debug) 
         : _p_ccu_address(p_ccu_address),          // store pointer to ccu address
           _p_power_manager(p_power_manager),      // store pointer to power manager
           _dataRequestCallback(nullptr),          // initialize callback to null
           _configCallback(nullptr),               // initialize callback to null
-          _mqttClient(_wifiClient)                // initialize pubsubclient with wifi client
+          _mqttClient(_wifiClient),               // initialize pubsubclient with wifi client
+          _debug_enabled(debug)
     {
         String mac = WiFi.macAddress(); // get the mac address
         _device_id = mac.substring(12, 14) + mac.substring(15, 17); // get last 4 hex digits
