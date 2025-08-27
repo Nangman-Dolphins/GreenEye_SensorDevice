@@ -33,14 +33,15 @@ String ccu_address     = "";   // holds the ccu address
 
 PowerManager powerManager;     // create the power manager object
 Camera camera;                 // create the camera object
-SensorsIO sensors(             // create the sensor io object
+SensorIO sensors(             // create the sensor io object
     &battery_level,
     &ambient_temp,
     &ambient_humidity,
     &light_intensity,
     &soil_temp,
     &soil_moisture,
-    &soil_ec
+    &soil_ec,
+    true
 );
 MQTTClient mqtt(&ccu_address, &powerManager); // create the mqtt client object
 Dashboard dashboard(           // create the dashboard object
@@ -94,7 +95,7 @@ void sendCameraData() {
         String output; // create string for json
         serializeJson(dataDoc, output); // convert json to string
         mqtt.publishData(output); // publish the image data
-        camera.releaseFrame(fb); // release the frame buffer
+        camera.releaseFrameForAnalyze(fb); // release the frame buffer
     } else {
         DEBUG_MAIN_PRINTLN("[ERROR] Failed to capture high quality frame for sending.");
     }
@@ -130,11 +131,7 @@ void setup() {
   if (enter_setup_flag) { // if the flag was set before rebooting
     isSetupMode = true; // enter setup mode
     preferences.putBool("setup_mode", false); // clear the flag for the next boot
-  } else { // if no flag, check the button press at boot time
-    if (digitalRead(SETUP_BUTTON_PIN) == HIGH) { // check if button is held high
-      isSetupMode = true; // enter setup mode
-    }
-  }
+  } 
 
   // initialize subsystems based on the selected mode
   if (isSetupMode) {
@@ -161,6 +158,7 @@ void loop() {
     static unsigned long buttonPressStartTime = 0;
     bool buttonPressed = (digitalRead(SETUP_BUTTON_PIN) == HIGH);
     if (buttonPressed) {
+      DEBUG_MAIN_PRINTLN("[DEBUG] button press detected!");
       if (buttonPressStartTime == 0) { buttonPressStartTime = millis(); } 
       else if (millis() - buttonPressStartTime > 3000) {
         DEBUG_MAIN_PRINTLN("[ACTION] Exiting Setup mode via button press. Restarting...");
@@ -177,7 +175,7 @@ void loop() {
   } else {
     // --- Normal Mode: Connect, Sense, Transmit, Sleep ---
     DEBUG_MAIN_PRINTLN("[ACTION] Connecting to WiFi...");
-    int connection_timeout = 20; // ~10 seconds
+    int connection_timeout = 40; // ~20 seconds
     while (WiFi.status() != WL_CONNECTED && connection_timeout > 0) { // wait for wifi connection
       delay(500);
       DEBUG_MAIN_PRINT(".");
