@@ -1,4 +1,5 @@
 #pragma once // prevents multiple inclusion of the header file
+
 #include <Preferences.h> // for non-volatile storage
 
 enum PowerMode { // defines the available power modes
@@ -16,6 +17,7 @@ private:
     unsigned long _senseInterval; // interval for sensor reading in seconds
     unsigned long _camInterval;   // interval for camera capture in seconds
     Preferences _preferences;   // non-volatile storage handler
+    bool _debug_enabled;        // flag for debug mode
 
     void updateIntervals() { // updates the intervals based on the current mode
         switch (_currentMode) {
@@ -25,15 +27,17 @@ private:
             case HIGH_FREQ:       _senseInterval = 20 * 60;  _camInterval = 1 * 3600; break;
             case ULTRA_HIGH_FREQ: _senseInterval = 20 * 60;  _camInterval = 40 * 60;  break;
         }
-        if (Serial) { // check if serial is initialized
+        if (_debug_enabled) { // check if debug mode is on
             Serial.printf("[PM] Mode updated. Sense interval: %lu s, Cam interval: %lu s\n", _senseInterval, _camInterval);
         }
     }
 
 public:
-    PowerManager() : 
+    // --- [MODIFIED] Constructor now accepts a debug flag ---
+    PowerManager(bool debug = false) : 
         _currentMode(NORMAL),        // set default power mode
-        _nightModeEnabled(true)      // enable night mode by default
+        _nightModeEnabled(true),     // enable night mode by default
+        _debug_enabled(debug)        // set debug mode from argument
     {}
 
     void begin() { // loads saved settings from non-volatile storage
@@ -41,6 +45,7 @@ public:
         char savedMode = _preferences.getChar("pwr_mode", 'M'); // load saved mode, default to 'm'
         _nightModeEnabled = _preferences.getBool("nht_mode", true); // load night mode setting, default to true
         setMode(savedMode); // apply the loaded or default mode
+        if (_debug_enabled) { Serial.println("[PM] PowerManager initialized."); }
     }
 
     void setMode(PowerMode newMode) { // sets a new power mode
@@ -59,13 +64,14 @@ public:
         if (newMode != _currentMode) { // if the mode actually changed
             setMode(newMode); // call the main setMode function
             _preferences.putChar("pwr_mode", modeChar); // save the new mode to storage
+            if (_debug_enabled) { Serial.printf("[PM] Power mode set to '%c' and saved.\n", modeChar); }
         }
     }
     
     void setNightMode(bool enabled) { // enables or disables night mode
         _nightModeEnabled = enabled; // update the internal flag
         _preferences.putBool("nht_mode", enabled); // save the setting to storage
-        if (Serial) { Serial.printf("[PM] Night mode set to: %s and saved.\n", enabled ? "ON" : "OFF"); }
+        if (_debug_enabled) { Serial.printf("[PM] Night mode set to: %s and saved.\n", enabled ? "ON" : "OFF"); }
     }
 
     unsigned long getSenseInterval() { return _senseInterval; } // returns the current sensor interval
