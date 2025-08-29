@@ -20,7 +20,7 @@
 #endif
 
 // --- Pin for entering Setup Mode ---
-#define SETUP_BUTTON_PIN 0 // IO0 pin is used to enter setup mode
+#define SETUP_BUTTON_PIN 3 // IO0 pin is used to enter setup mode
 
 // --- Forward declarations for callbacks ---
 void sendSensorData();
@@ -101,28 +101,32 @@ void handleWakeupReason(){
 // --- MQTT Event Handler Functions ---
 
 void sendSensorData() {
-    //sensors.readAllSensors(); // Make sure sensor data is fresh before sending
-    if (!dashboard.isConnected()) { // check if connected to wifi
-        DEBUG_MAIN_PRINTLN("[WARN] Not connected to WiFi, cannot send data."); return; // exit if not connected
-    }
-    
-    JsonDocument dataDoc; // create a json document
-    dataDoc["bat_level"] = battery_level; // add battery level to json
-    dataDoc["amb_temp"] = ambient_temp; // add ambient temperature to json
-    dataDoc["amb_humi"] = ambient_humidity; // add ambient humidity to json
-    dataDoc["amb_light"] = light_intensity; // add light intensity to json
-    dataDoc["soil_temp"] = soil_temp; // add soil temperature to json
-    dataDoc["soil_humi"] = soil_moisture; // add soil moisture to json
-    dataDoc["soil_ec"] = soil_ec; // add soil ec to json
-    String output; // create a string to hold the json
-    serializeJson(dataDoc, output); // convert json to string
-    print_memory_status("Sensor data JSON creation");
-    mqtt.loop();
-    mqtt.publishData(output);       // publish the data
+  if (!dashboard.isConnected()) { // check if connected to wifi
+      DEBUG_MAIN_PRINTLN("[WARN] Not connected to WiFi, cannot send data."); return; // exit if not connected
+  }
+  
+  delay(250); // for stabilize
+  sensors.readAllSensors(); // Make sure sensor data is fresh before sending
+
+  JsonDocument dataDoc; // create a json document
+  dataDoc["bat_level"] = battery_level; // add battery level to json
+  dataDoc["amb_temp"] = ambient_temp; // add ambient temperature to json
+  dataDoc["amb_humi"] = ambient_humidity; // add ambient humidity to json
+  dataDoc["amb_light"] = light_intensity; // add light intensity to json
+  dataDoc["soil_temp"] = soil_temp; // add soil temperature to json
+  dataDoc["soil_humi"] = soil_moisture; // add soil moisture to json
+  dataDoc["soil_ec"] = soil_ec; // add soil ec to json
+  String output; // create a string to hold the json
+  serializeJson(dataDoc, output); // convert json to string
+  print_memory_status("Sensor data JSON creation");
+  mqtt.loop();
+  mqtt.publishData(output);       // publish the data
 }
 
 void sendCameraData() {
     if (!dashboard.isConnected()) return; // exit if not connected
+
+    delay(250); // for stabilize
 
     print_memory_status("Before capture frame");
     DEBUG_MAIN_PRINTLN("[ACTION] Capturing high quality frame to send...");
@@ -212,9 +216,12 @@ void setup() {
   Serial.begin(115200); // initialize serial communication
   delay(1000); // wait for serial monitor to open
 
+  if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
+  print_memory_status("After camera init");
+
   pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
 
-  DEBUG_MAIN_PRINTLN("[INFO] Waiting 2 seconds for IO0 pin to stabilize...");
+  DEBUG_MAIN_PRINTLN("[INFO] Waiting 2 seconds for IO3 pin to stabilize...");
   delay(2000); bootCount++; // increment the deep sleep wake-up counter
   DEBUG_MAIN_PRINT("[INFO] === Boot count: ");
   DEBUG_MAIN_PRINT(bootCount); DEBUG_MAIN_PRINTLN(" ===");
@@ -231,19 +238,7 @@ void setup() {
     //preferences.putBool("setup_mode", false); // clear the flag for the next boot
   }
 
-  if (digitalRead(SETUP_BUTTON_PIN) == LOW) {
-    DEBUG_MAIN_PRINTLN("[INFO] IO0 pin is LOW. Waiting for it to go HIGH to start Normal Mode..."); 
-    while(digitalRead(SETUP_BUTTON_PIN) == LOW) {
-      delay(100);
-      DEBUG_MAIN_PRINT("."); 
-    }
-    DEBUG_MAIN_PRINTLN("\n[INFO] IO0 is now HIGH. Continuing boot."); 
-  } 
-
   // initialize subsystems based on the selected mode
-  sensors.begin(); // initialize sensors 
-  print_memory_status("After sensors init");
-
   if (isSetupMode) {
     DEBUG_MAIN_PRINTLN("[MODE] SETUP MODE ACTIVATED."); 
     dashboard.begin(); 
@@ -261,8 +256,10 @@ void setup() {
   }
   DEBUG_MAIN_PRINTLN("Complete!");
 
-  if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
-  print_memory_status("After camera init");
+  
+  sensors.begin(); // initialize sensors 
+  print_memory_status("After sensors init");
+  
 
   // Initialize MQTT only if WiFi is connected
   if (WiFi.status() == WL_CONNECTED) {
@@ -274,11 +271,10 @@ void setup() {
       DEBUG_MAIN_PRINTLN("\n[WARN] WiFi connection failed in setup."); 
   }
   print_memory_status("After WiFi init");
-
-  pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
 }
 
 void loop() {
+
   if (isSetupMode) {
     // --- Setup Mode Loop ---
     dashboard.loop(); // continuously handle web server requests
@@ -300,6 +296,7 @@ void loop() {
       preferences.putBool("setup_mode", false); // clear the flag for the next boot
       ESP.restart(); // reboot into normal mode
     }
+    
   } else {
     // --- Normal Mode: Sense, Transmit, Sleep ---
 
@@ -312,12 +309,12 @@ void loop() {
           unsigned long cam_interval = powerManager.getCamInterval();
           
           // Always send sensor data on wakeup in normal mode
-          //sendSensorData();
+          sendSensorData();
           
           if (cam_interval > 0 && sense_interval > 0) { // prevent division by zero
             int sense_cycles_per_cam = cam_interval / sense_interval; 
             if (bootCount % sense_cycles_per_cam == 0) {
-                //sendCameraData(); 
+                sendCameraData(); 
             }
           }
           delay(2000); // wait for data to be sent before sleeping
@@ -336,7 +333,7 @@ void loop() {
     DEBUG_MAIN_PRINT("[ACTION] Entering deep sleep for ");
     DEBUG_MAIN_PRINT(sleep_duration_seconds); DEBUG_MAIN_PRINTLN(" seconds."); // configure wakeup sources
     esp_sleep_enable_timer_wakeup(sleep_duration_seconds * 1000000ULL); // set the wakeup timer
-    esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0); // enable wakeup on button press
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_3, 0); // enable wakeup on button press
 
     esp_deep_sleep_start(); // enter deep sleep
   }
