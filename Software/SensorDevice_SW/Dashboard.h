@@ -6,6 +6,10 @@
 #include <Preferences.h> // for non-volatile storage
 #include <pgmspace.h>  // for storing data in flash memory
 #include "Camera.h"    // include the custom camera class
+#include "PowerManager.h" // include PowerManager to access its functions
+
+// define function pointer types for actions triggered from the dashboard
+using ActionCallback = void(*)();
 
 // --- HTML Content Pages ---
 static const char DASHBOARD_MAIN_TEMPLATE[] PROGMEM = R"rawliteral(
@@ -13,10 +17,10 @@ static const char DASHBOARD_MAIN_TEMPLATE[] PROGMEM = R"rawliteral(
 <style>
 body{font-family:Arial,sans-serif;display:flex;flex-direction:column;justify-content:center;align-items:center;height:100%;background-color:#f0f2f5;margin:0;padding-top:1rem;padding-bottom:1rem;width:100%;box-sizing:border-box;}
 .container{margin:0.5rem;background-color:#fff;padding:2rem;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.1);text-align:center;width:90%;max-width:420px;box-sizing:border-box;}
-h1{color:#333;line-height:1.2;margin-top:0;margin-bottom:0.5rem;}
+h1{color:#333;line-height:1.2;margin-top:0;margin-bottom:0.5rem;} h3{margin-top:0;}
 .form-group{margin-bottom:1.5rem;text-align:left}
 label{display:block;margin-bottom:.5rem;font-weight:700;color:#555}
-input[type=text],input[type=password]{width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box}
+input[type=text],input[type=password],select{width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box}
 button{width:100%;padding:12px;color:#fff;border:none;border-radius:4px;font-size:1rem;cursor:pointer;background-color:#128037}
 button:hover{background-color:#007025}
 .status-box{text-align:left;padding:1.5rem;border:1px solid #e0e0e0;border-radius:8px;}
@@ -26,14 +30,16 @@ button:hover{background-color:#007025}
 .status-connected{color:#28a745;font-weight:700}
 .btn-danger{margin-top:1rem;background-color:#dc3545}
 .btn-danger:hover{background-color:#c82333}
-a{margin:0.5rem;width:30%; text-decoration:none;}
+.btn-secondary{background-color:#6c757d} .btn-secondary:hover{background-color:#5a6268}
+.btn-group form{margin-bottom:0.5rem;}
+a{margin:0.2rem;width:24%; text-decoration:none;}
 .nav{margin-top:-1rem;margin-bottom:-1rem;display:flex;align-items:center;flex-direction:row;justify-content:center;}
 .nav-button{background-color:#666666;}
 .nav-button:hover{background-color:#333;}
 .battery-display{font-size:0.9rem;color:#333;margin-top:-0.5rem;margin-bottom:0.5rem;}
 </style>
 </head><body><div class="container"><div class="battery-display">배터리 잔량 __BATTERY_LEVEL__%</div><h1>__DASHBOARD_TITLE__</h1><br>
-    <div class="nav"><a href="/"><button class="nav-button">연결 설정</button></a><a href="/dashboard"><button class="nav-button">센서 값</button></a><a href="/camera"><button class="nav-button">카메라</button></a></div></div>
+    <div class="nav"><a href="/"><button class="nav-button">연결</button></a><a href="/dashboard"><button class="nav-button">센서</button></a><a href="/camera"><button class="nav-button">카메라</button></a><a href="/debug"><button class="nav-button">디버그</button></a></div></div>
 <div class="container">__PAGE_CONTENT__</div></body></html>
 )rawliteral";
 
@@ -64,6 +70,10 @@ static const char SETUP_FORM_CONTENT[] PROGMEM = R"rawliteral(
 
 static const char DASHBOARD_CONTENT[] PROGMEM = R"rawliteral(
 <div class="status-box">
+    <h3>단말 정보</h3>
+    <div class="status-item"><span class="status-label">전원 모드:</span><span class="status-value">__POWER_MODE__</span></div>
+    <div class="status-item"><span class="status-label">야간 모드:</span><span class="status-value">__NIGHT_MODE__</span></div>
+    <hr style="border:none;border-top:1px solid #e0e0e0;margin:1.5rem 0;">
     <h3>환경 정보</h3>
     <div class="status-item"><span class="status-label">온도:</span><span class="status-value">__TEMP_AMBIENT__ &deg;C</span></div>
     <div class="status-item"><span class="status-label">습도:</span><span class="status-value">__HUMIDITY__ %</span></div>
@@ -79,6 +89,42 @@ static const char DASHBOARD_CONTENT[] PROGMEM = R"rawliteral(
 static const char CAMERA_CONTENT[] PROGMEM = R"rawliteral(
 <div>
     <img src="/stream" style="width:100%; max-width:400px; border-radius:8px;">
+</div>
+)rawliteral";
+
+static const char DEBUG_PAGE_CONTENT[] PROGMEM = R"rawliteral(
+<div class="status-box">
+    <h3>수동 제어</h3>
+    <div class="btn-group">
+        <form action="/send_sensor" method="post"><button type="submit">센싱 데이터 전송</button></form>
+        <form action="/send_all" method="post"><button type="submit" class="btn-secondary">전체 데이터(센서+카메라) 전송</button></form>
+    </div>
+    <hr style="border:none;border-top:1px solid #e0e0e0;margin:1.5rem 0;">
+    <h3>전원 모드 변경</h3>
+    <form action="/set_power_mode" method="post">
+        <div class="form-group">
+            <select id="pwr_mode" name="pwr_mode">
+                <option value="D">Debugging</option>
+                <option value="U">Ultra High Freq</option>
+                <option value="H">High Freq</option>
+                <option value="M" selected>Normal</option>
+                <option value="L">Low Power</option>
+                <option value="Z">Ultra Low Power</option>
+            </select>
+        </div>
+        <button type="submit">전원 모드 적용</button>
+    </form>
+    <hr style="border:none;border-top:1px solid #e0e0e0;margin:1.5rem 0;">
+    <h3>야간 모드 변경</h3>
+    <form action="/set_night_mode" method="post">
+        <div class="form-group">
+            <select id="nht_mode" name="nht_mode">
+                <option value="1">활성화 (ON)</option>
+                <option value="0">비활성화 (OFF)</option>
+            </select>
+        </div>
+        <button type="submit">야간 모드 적용</button>
+    </form>
 </div>
 )rawliteral";
 
@@ -173,6 +219,10 @@ private:
     float* _p_ec;               // pointer for soil conductivity
     Camera* _p_camera;          // pointer for camera object
     String* _p_ccu_address;     // pointer for ccu address string
+    PowerManager* _p_power_manager;
+    ActionCallback _sendSensorCallback;
+    ActionCallback _sendAllCallback;
+
 
 public:
     Dashboard(
@@ -181,20 +231,26 @@ public:
         float* p_temp_soil, float* p_moisture, float* p_ec,
         Camera* p_camera,
         String* p_ccu_address,
+        PowerManager* p_power_manager,
+        ActionCallback sendSensorCallback,
+        ActionCallback sendAllCallback,
         const char* apPassword = "defaultPW", 
         bool debug = false
-    ) : _server(80), // initialize server on port 80
-        _ap_password(apPassword),        // set ap password from argument
-        _debug_enabled(debug),           // set debug mode from argument
-        _p_battery_level(p_battery_level),// store pointer to battery level
-        _p_temp_ambient(p_temp_ambient), // store pointer to ambient temp
-        _p_humidity(p_humidity),         // store pointer to humidity
-        _p_light(p_light),               // store pointer to light
-        _p_temp_soil(p_temp_soil),       // store pointer to soil temp
-        _p_moisture(p_moisture),         // store pointer to moisture
-        _p_ec(p_ec),                     // store pointer to ec
-        _p_camera(p_camera),             // store pointer to camera
-        _p_ccu_address(p_ccu_address)    // store pointer to ccu address
+    ) : _server(80),
+        _ap_password(apPassword),
+        _debug_enabled(debug),
+        _p_battery_level(p_battery_level),
+        _p_temp_ambient(p_temp_ambient),
+        _p_humidity(p_humidity),
+        _p_light(p_light),
+        _p_temp_soil(p_temp_soil),
+        _p_moisture(p_moisture),
+        _p_ec(p_ec),
+        _p_camera(p_camera),
+        _p_ccu_address(p_ccu_address),
+        _p_power_manager(p_power_manager), // Initialize power manager pointer
+        _sendSensorCallback(sendSensorCallback), // Initialize sensor callback
+        _sendAllCallback(sendAllCallback)      // Initialize all data callback
     {}
 
     void begin() {
@@ -297,6 +353,13 @@ private:
         _server.on("/stream", HTTP_GET, std::bind(&Dashboard::handleStream, this)); // route for mjpeg stream
         _server.on("/save_ccu", HTTP_POST, std::bind(&Dashboard::handleSaveCcu, this)); // route for saving ccu address
 
+        // ADDED: Routes for debug page actions
+        _server.on("/debug", HTTP_GET, std::bind(&Dashboard::handleDebugPage, this));
+        _server.on("/send_sensor", HTTP_POST, std::bind(&Dashboard::handleSendSensor, this));
+        _server.on("/send_all", HTTP_POST, std::bind(&Dashboard::handleSendAll, this));
+        _server.on("/set_power_mode", HTTP_POST, std::bind(&Dashboard::handleSetPowerMode, this));
+        _server.on("/set_night_mode", HTTP_POST, std::bind(&Dashboard::handleSetNightMode, this));
+        
         _server.onNotFound([this]() { // handler for any other page
             if (_debug_enabled) { Serial.println("[WARN] Function called: onNotFound - Page not found."); } // log 404
             _server.send(404, "text/plain", "404: Not Found"); // send 404 error
@@ -325,6 +388,11 @@ private:
             page_content.replace("__CURRENT_CCU_ADDRESS__", current_ccu); // replace ccu placeholder
         }
         else if (content_progmem == DASHBOARD_CONTENT) { // if it is the sensor dashboard page
+            // ADDED: Replace device status placeholders
+            if (_p_power_manager) {
+                page_content.replace("__POWER_MODE__", _p_power_manager->getModeString());
+                page_content.replace("__NIGHT_MODE__", _p_power_manager->isNightModeEnabled() ? "활성화" : "비활성화");
+            }
             if (_p_temp_ambient) page_content.replace("__TEMP_AMBIENT__", String(*_p_temp_ambient, 1)); // update with sensor data
             if (_p_humidity)     page_content.replace("__HUMIDITY__",     String(*_p_humidity, 1));
             if (_p_light)        page_content.replace("__LIGHT__",        String(*_p_light, 1));
@@ -434,5 +502,45 @@ private:
         _server.send_P(200, "text/html", FORGET_SUCCESS_PAGE_HTML); // send forgotten page
         delay(2000); // wait for page to be sent
         ESP.restart(); // restart the device
+    }
+    
+    // ADDED: Handlers for the new debug page
+    void handleDebugPage() {
+        if (_debug_enabled) { Serial.println("[INFO] Function called: handleDebugPage()"); }
+        _server.send(200, "text/html", buildPage(DEBUG_PAGE_CONTENT));
+    }
+
+    void handleSendSensor() {
+        if (_debug_enabled) { Serial.println("[ACTION] Triggered Send Sensor Data via dashboard."); }
+        if (_sendSensorCallback) { _sendSensorCallback(); }
+        _server.sendHeader("Location", "/debug");
+        _server.send(302, "text/plain", "Sensor data sent. Redirecting...");
+    }
+
+    void handleSendAll() {
+        if (_debug_enabled) { Serial.println("[ACTION] Triggered Send All Data via dashboard."); }
+        if (_sendAllCallback) { _sendAllCallback(); }
+        _server.sendHeader("Location", "/debug");
+        _server.send(302, "text/plain", "All data sent. Redirecting...");
+    }
+
+    void handleSetPowerMode() {
+        if (_p_power_manager && _server.hasArg("pwr_mode")) {
+            String modeStr = _server.arg("pwr_mode");
+            if (_debug_enabled) { Serial.print("[ACTION] Setting power mode to: "); Serial.println(modeStr[0]); }
+            _p_power_manager->setMode(modeStr[0]);
+        }
+        _server.sendHeader("Location", "/debug");
+        _server.send(302, "text/plain", "Power mode set. Redirecting...");
+    }
+
+    void handleSetNightMode() {
+        if (_p_power_manager && _server.hasArg("nht_mode")) {
+            bool nightMode = _server.arg("nht_mode").toInt() == 1;
+            if (_debug_enabled) { Serial.print("[ACTION] Setting night mode to: "); Serial.println(nightMode ? "ON" : "OFF"); }
+            _p_power_manager->setNightMode(nightMode);
+        }
+        _server.sendHeader("Location", "/debug");
+        _server.send(302, "text/plain", "Night mode set. Redirecting...");
     }
 };
