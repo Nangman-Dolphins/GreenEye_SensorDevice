@@ -263,7 +263,9 @@ void loop() {
     if (buttonPressed) {
       DEBUG_MAIN_PRINTLN("[DEBUG] button press detected!"); if (buttonPressStartTime == 0) { buttonPressStartTime = millis(); }
       else if (millis() - buttonPressStartTime > 3000) {
-        DEBUG_MAIN_PRINTLN("[ACTION] Exiting Setup mode via button press. Restarting..."); ESP.restart();
+        DEBUG_MAIN_PRINTLN("[ACTION] Exiting Setup mode via button press. Restarting..."); 
+        preferences.putBool("setup_mode", false);
+        ESP.restart();
       }
     } else {
       buttonPressStartTime = 0; }
