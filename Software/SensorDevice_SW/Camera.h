@@ -50,13 +50,14 @@ public:
       config.pin_sccb_scl = SIOC_GPIO_NUM;
       config.pin_pwdn = PWDN_GPIO_NUM;
       config.pin_reset = RESET_GPIO_NUM;
-      config.xclk_freq_hz = 20000000;
+      config.xclk_freq_hz = 10000000;
       config.pixel_format = PIXFORMAT_JPEG; // use jpeg format for streaming
+      config.fb_location = CAMERA_FB_IN_PSRAM;
       
-      // set default resolution to vga
-      config.frame_size = FRAMESIZE_QVGA; // 320x240 (default)
+      // set default resolution
+      config.frame_size = FRAMESIZE_240X240; // 240x240 (default)
       config.jpeg_quality = DFT_QUALITY;  // 0-63, lower number means higher quality  (default)
-      config.fb_count = 2;                // use 2 frame buffers for svga stability  (default)
+      config.fb_count = 1;                // use 2 frame buffers for stability  (default)
     }
 
     bool begin() {
@@ -72,7 +73,7 @@ public:
 
         if (s) { // if sensor object is valid
             // --- Resolution & Quality ---
-            s->set_framesize(s, FRAMESIZE_QVGA);  // set frame size to qvga (default)
+            s->set_framesize(s, FRAMESIZE_240X240);  // set frame size to default
             s->set_quality(s, DFT_QUALITY);       // set jpeg quality (default)
 
             // --- Lens Correction ---
@@ -99,7 +100,7 @@ public:
         } else {
             Serial.println("Failed to get camera sensor.");
         }
-        
+        esp_camera_fb_return(NULL);
         return true; // return true on success
     }
 
