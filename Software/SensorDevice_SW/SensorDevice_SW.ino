@@ -213,29 +213,33 @@ void setup() {
   } 
 
   // initialize subsystems based on the selected mode
-  if (isSetupMode) {
-    DEBUG_MAIN_PRINTLN("[MODE] SETUP MODE ACTIVATED."); if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
-    dashboard.begin(); } else {
-    DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED.");
-    sensors.begin(); // initialize sensors
-    if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
-    dashboard.beginWiFi(); // wifi only
-    DEBUG_MAIN_PRINT("[ACTION] Connecting to WiFi in setup");
-    int connection_timeout = 30; // wait for ~15 seconds
-    while (WiFi.status() != WL_CONNECTED && connection_timeout > 0) {
-        delay(500); DEBUG_MAIN_PRINT(".");
-        connection_timeout--;
-    }
+  if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
+  sensors.begin(); // initialize sensors 
 
-    // Initialize MQTT only if WiFi is connected
+  if (isSetupMode) {
+    DEBUG_MAIN_PRINTLN("[MODE] SETUP MODE ACTIVATED."); 
+    dashboard.begin(); 
+  } else {
+    DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED.");
+    dashboard.beginWiFi(); // wifi only
+  }
+  
+  DEBUG_MAIN_PRINT("[ACTION] Connecting to WiFi");
+  int connection_timeout = 30; // wait for ~15 seconds
+  while (WiFi.status() != WL_CONNECTED && connection_timeout > 0) {
+      delay(500); DEBUG_MAIN_PRINT(".");
+      connection_timeout--;
+  }
+
+  // Initialize MQTT only if WiFi is connected
     if (WiFi.status() == WL_CONNECTED) {
         DEBUG_MAIN_PRINTLN("\n[INFO] WiFi connected successfully in setup."); 
         mqtt.onDataRequest(handleDataRequest); // register the data request callback
         mqtt.onConfig(handleConfig); // register the config callback
         mqtt.begin(); // initialize mqtt client
     } else {
-        DEBUG_MAIN_PRINTLN("\n[WARN] WiFi connection failed in setup."); }
-  }
+        DEBUG_MAIN_PRINTLN("\n[WARN] WiFi connection failed in setup."); 
+    }
 
   pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
 }
