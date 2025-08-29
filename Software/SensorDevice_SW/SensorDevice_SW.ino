@@ -101,7 +101,7 @@ void handleWakeupReason(){
 // --- MQTT Event Handler Functions ---
 
 void sendSensorData() {
-    sensors.readAllSensors(); // Make sure sensor data is fresh before sending
+    //sensors.readAllSensors(); // Make sure sensor data is fresh before sending
     mqtt.loop();
     if (!dashboard.isConnected()) { // check if connected to wifi
         DEBUG_MAIN_PRINTLN("[WARN] Not connected to WiFi, cannot send data."); return; // exit if not connected
@@ -127,19 +127,27 @@ void sendCameraData() {
 
     if (fb) { // if frame capture was successful
         DEBUG_MAIN_PRINTLN("[DEBUG] Frame captured successfully.");
-        size_t output_len; // to store the length of the encoded data
 
+        size_t output_len; 
+        
+        // calculate the required buffer size
         mbedtls_base64_encode(NULL, 0, &output_len, fb->buf, fb->len);
         
-        // allocate memory for the base64 buffer. +1 for null terminator.
-        unsigned char *base64_buf = (unsigned char *)malloc(output_len);
+        unsigned char *base64_buf = (unsigned char *)malloc(output_len + 1); // +1 for null terminator
         if (base64_buf == NULL) {
             DEBUG_MAIN_PRINTLN("[ERROR] Failed to allocate memory for Base64 buffer!");
-            camera.releaseFrameForAnalyze(fb); // IMPORTANT: release frame buffer before returning
+            camera.releaseFrameForAnalyze(fb);
             return;
         }
 
-        mbedtls_base64_encode(base64_buf, output_len, &output_len, fb->buf, fb->len);
+        // perform the actual encoding
+        if(mbedtls_base64_encode(base64_buf, output_len + 1, &output_len, fb->buf, fb->len) != 0) {
+            DEBUG_MAIN_PRINTLN("[ERROR] Base64 encoding failed!");
+            free(base64_buf);
+            camera.releaseFrameForAnalyze(fb);
+            return;
+        }
+        base64_buf[output_len] = '\0'; // ensure null termination
 
         JsonDocument dataDoc;
         dataDoc["plant_img"] = (char*)base64_buf;
@@ -152,12 +160,13 @@ void sendCameraData() {
         
         free(base64_buf);
         camera.releaseFrameForAnalyze(fb); // release the frame buffer
+
     } else {
         DEBUG_MAIN_PRINTLN("[ERROR] Failed to capture high quality frame for sending.");
     }
 }
 
-// ADDED: Wrapper function to send both sensor and camera data
+// wrapper function to send both sensor and camera data
 void sendAllData() {
     sendSensorData();
     delay(100); // Small delay between sends

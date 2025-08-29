@@ -125,6 +125,8 @@ public:
             _mqttClient.setServer((*_p_ccu_address).c_str(), 1883); // set the mqtt server
             _last_ccu_address = *_p_ccu_address; // store it as the last known address
         }
+
+        _mqttClient.setBufferSize(32786);
     }
 
     // returns true if connected, false if connection fails after retries
