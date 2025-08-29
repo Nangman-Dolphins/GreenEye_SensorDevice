@@ -222,7 +222,6 @@ void setup() {
   } 
 
   // initialize subsystems based on the selected mode
-  if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
   sensors.begin(); // initialize sensors 
 
   if (isSetupMode) {
@@ -232,17 +231,20 @@ void setup() {
     DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED.");
     dashboard.beginWiFi(); // wifi only
   }
-  
   DEBUG_MAIN_PRINT("[ACTION] Connecting to WiFi");
+  
   int connection_timeout = 30; // wait for ~15 seconds
   while (WiFi.status() != WL_CONNECTED && connection_timeout > 0) {
       delay(500); DEBUG_MAIN_PRINT(".");
       connection_timeout--;
   }
+  DEBUG_MAIN_PRINTLN("Complete!");
+
+  if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
 
   // Initialize MQTT only if WiFi is connected
     if (WiFi.status() == WL_CONNECTED) {
-        DEBUG_MAIN_PRINTLN("\n[INFO] WiFi connected successfully in setup."); 
+        DEBUG_MAIN_PRINTLN("\n[INFO] MQTT Initialize."); 
         mqtt.onDataRequest(handleDataRequest); // register the data request callback
         mqtt.onConfig(handleConfig); // register the config callback
         mqtt.begin(); // initialize mqtt client
@@ -282,8 +284,6 @@ void loop() {
       DEBUG_MAIN_PRINTLN("[INFO] WiFi Connected."); // mqtt.loop() handles timed reconnection and returns status
       if (mqtt.loop()) {
           DEBUG_MAIN_PRINTLN("[INFO] MQTT broker connected."); 
-          //sensors.readAllSensors(); // logic now handled by specific send functions
-          //sendSensorData();
           
           unsigned long sense_interval = powerManager.getSenseInterval();
           unsigned long cam_interval = powerManager.getCamInterval();
