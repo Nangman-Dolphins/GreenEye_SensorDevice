@@ -6,6 +6,7 @@
 #include "PowerManager.h" // include the power manager class
 #include "MQTT.h"         // include the mqtt client class
 #include <Preferences.h>  // include for using the setup mode flag
+#include "mbedtls/base64.h" // include for base64 incoding
 
 // === Main Debug Switch ===
 #define MAIN_DEBUG 1 // set to 1 to enable detailed logs from this file, 0 to disable
@@ -120,20 +121,40 @@ void sendSensorData() {
 
 void sendCameraData() {
     if (!dashboard.isConnected()) return; // exit if not connected
+    
     DEBUG_MAIN_PRINTLN("[ACTION] Capturing high quality frame to send...");
     camera_fb_t* fb = camera.captureFrameForAnalyze(); // capture a high quality frame
+
     if (fb) { // if frame capture was successful
-        DEBUG_MAIN_PRINTLN("[DEBUG] Frame captured successfully."); 
-        JsonDocument dataDoc; // create json document
-        // TODO base32 incoding
-        dataDoc["plant_img"] = "base64-encoded-image-placeholder"; 
-        String output; // create string for json
-        serializeJson(dataDoc, output); // convert json to string
+        DEBUG_MAIN_PRINTLN("[DEBUG] Frame captured successfully.");
+        size_t output_len; // to store the length of the encoded data
+
+        mbedtls_base64_encode(NULL, 0, &output_len, fb->buf, fb->len);
+        
+        // allocate memory for the base64 buffer. +1 for null terminator.
+        unsigned char *base64_buf = (unsigned char *)malloc(output_len);
+        if (base64_buf == NULL) {
+            DEBUG_MAIN_PRINTLN("[ERROR] Failed to allocate memory for Base64 buffer!");
+            camera.releaseFrameForAnalyze(fb); // IMPORTANT: release frame buffer before returning
+            return;
+        }
+
+        mbedtls_base64_encode(base64_buf, output_len, &output_len, fb->buf, fb->len);
+
+        JsonDocument dataDoc;
+        dataDoc["plant_img"] = (char*)base64_buf;
+        
+        String output;
+        serializeJson(dataDoc, output);
+        
         mqtt.loop();
-        mqtt.publishData(output); // publish the image data
+        mqtt.publishData(output); // publish the data
+        
+        free(base64_buf);
         camera.releaseFrameForAnalyze(fb); // release the frame buffer
     } else {
-        DEBUG_MAIN_PRINTLN("[ERROR] Failed to capture high quality frame for sending."); }
+        DEBUG_MAIN_PRINTLN("[ERROR] Failed to capture high quality frame for sending.");
+    }
 }
 
 // ADDED: Wrapper function to send both sensor and camera data
