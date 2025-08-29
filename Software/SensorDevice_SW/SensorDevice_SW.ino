@@ -1,3 +1,5 @@
+// SensorDevice_SW.ino
+
 #include "Camera.h"       // include the camera class
 #include "Dashboard.h"    // include the dashboard class
 #include "SensorsIO.h"    // include the sensor io class
@@ -19,6 +21,10 @@
 // --- Pin for entering Setup Mode ---
 #define SETUP_BUTTON_PIN 0 // IO0 pin is used to enter setup mode
 
+// --- Forward declarations for callbacks ---
+void sendSensorData();
+void sendAllData();
+
 // --- Global Variables & Objects ---
 RTC_DATA_ATTR int bootCount = 0; // a counter that survives deep sleep
 
@@ -33,7 +39,7 @@ String ccu_address     = "";   // holds the ccu address
 
 PowerManager powerManager(MAIN_DEBUG); // create the power manager object
 Camera camera;                 // create the camera object
-SensorIO sensors(              // create the sensor io object
+SensorIO sensors(              // create the sensor io class
     &battery_level,
     &ambient_temp,
     &ambient_humidity,
@@ -48,7 +54,8 @@ MQTTClient mqtt(                // create the mqtt client object
   &powerManager,
   MAIN_DEBUG
 );
-Dashboard dashboard(           // create the dashboard object
+
+Dashboard dashboard(
     &battery_level,
     &ambient_temp,
     &ambient_humidity,
@@ -58,6 +65,9 @@ Dashboard dashboard(           // create the dashboard object
     &soil_ec,
     &camera,
     &ccu_address,
+    &powerManager,              // Pass power manager instance
+    &sendSensorData,            // Pass sensor data sending function
+    &sendAllData,               // Pass all data sending function
     "defaultPW",                // Access Point Password
     MAIN_DEBUG
 );
@@ -70,31 +80,29 @@ const unsigned long SETUP_MODE_TIMEOUT = 10 * 60 * 1000; // 10 minutes timeout f
 // --- Wakeup Reason Handler ---
 void handleWakeupReason(){
   esp_sleep_wakeup_cause_t wakeup_reason;
-  wakeup_reason = esp_sleep_get_wakeup_cause();
-
+  wakeup_reason = esp_sleep_get_wakeup_cause(); 
+  
   switch(wakeup_reason)
   {
     case ESP_SLEEP_WAKEUP_EXT0 : // in case of waking up from button press
-      DEBUG_MAIN_PRINTLN("[INFO] Wakeup caused by external signal using RTC_IO");
+      DEBUG_MAIN_PRINTLN("[INFO] Wakeup caused by external signal using RTC_IO"); 
       preferences.putBool("setup_mode", true); // set the flag to enter setup mode
-      DEBUG_MAIN_PRINTLN("[ACTION] Rebooting into setup mode...");
+      DEBUG_MAIN_PRINTLN("[ACTION] Rebooting into setup mode..."); 
       ESP.restart(); // restart to apply the mode change
-      break;
+      break; 
     case ESP_SLEEP_WAKEUP_TIMER : // in case of waking up from timer
-      DEBUG_MAIN_PRINTLN("[INFO] Wakeup caused by timer");
-      break;
+      DEBUG_MAIN_PRINTLN("[INFO] Wakeup caused by timer"); break;
     default : // in other cases
-      DEBUG_MAIN_PRINTLN("[INFO] Wakeup was not caused by deep sleep");
-      break;
+      DEBUG_MAIN_PRINTLN("[INFO] Wakeup was not caused by deep sleep"); break;
   }
 }
 
 // --- MQTT Event Handler Functions ---
 
 void sendSensorData() {
+    sensors.readAllSensors(); // Make sure sensor data is fresh before sending
     if (!dashboard.isConnected()) { // check if connected to wifi
-        DEBUG_MAIN_PRINTLN("[WARN] Not connected to WiFi, cannot send data.");
-        return; // exit if not connected
+        DEBUG_MAIN_PRINTLN("[WARN] Not connected to WiFi, cannot send data."); return; // exit if not connected
     }
     JsonDocument dataDoc; // create a json document
     dataDoc["bat_level"] = battery_level; // add battery level to json
@@ -114,17 +122,21 @@ void sendCameraData() {
     DEBUG_MAIN_PRINTLN("[ACTION] Capturing high quality frame to send...");
     camera_fb_t* fb = camera.captureFrameForAnalyze(); // capture a high quality frame
     if (fb) { // if frame capture was successful
-        DEBUG_MAIN_PRINTLN("[DEBUG] Frame captured successfully.");
-        JsonDocument dataDoc; // create json document
+        DEBUG_MAIN_PRINTLN("[DEBUG] Frame captured successfully."); JsonDocument dataDoc; // create json document
         // note: for actual use, the frame buffer (fb->buf) should be Base64 encoded here
-        dataDoc["plant_img"] = "base64-encoded-image-placeholder";
-        String output; // create string for json
+        dataDoc["plant_img"] = "base64-encoded-image-placeholder"; String output; // create string for json
         serializeJson(dataDoc, output); // convert json to string
         mqtt.publishData(output); // publish the image data
         camera.releaseFrameForAnalyze(fb); // release the frame buffer
     } else {
-        DEBUG_MAIN_PRINTLN("[ERROR] Failed to capture high quality frame for sending.");
-    }
+        DEBUG_MAIN_PRINTLN("[ERROR] Failed to capture high quality frame for sending."); }
+}
+
+// ADDED: Wrapper function to send both sensor and camera data
+void sendAllData() {
+    sendSensorData();
+    delay(100); // Small delay between sends
+    sendCameraData();
 }
 
 void handleDataRequest() {
@@ -133,8 +145,7 @@ void handleDataRequest() {
 }
 
 void handleConfig(JsonDocument& doc, PowerManager& pm) {
-    DEBUG_MAIN_PRINTLN("[MQTT] Config received from CCU.");
-    if (!doc["pwr_mode"].isNull()) { // if the json contains 'pwr_mode'
+    DEBUG_MAIN_PRINTLN("[MQTT] Config received from CCU."); if (!doc["pwr_mode"].isNull()) { // if the json contains 'pwr_mode'
         const char* pwr_mode_str = doc["pwr_mode"]; // get the value as a string
         pm.setMode(pwr_mode_str[0]); // use the first character to set the mode
     }
@@ -151,9 +162,7 @@ void setup() {
   pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
 
   DEBUG_MAIN_PRINTLN("[INFO] Waiting 2 seconds for IO0 pin to stabilize...");
-  delay(2000);
-
-  bootCount++; // increment the deep sleep wake-up counter
+  delay(2000); bootCount++; // increment the deep sleep wake-up counter
   DEBUG_MAIN_PRINT("[INFO] === Boot count: ");
   DEBUG_MAIN_PRINT(bootCount); DEBUG_MAIN_PRINTLN(" ===");
 
@@ -165,28 +174,22 @@ void setup() {
   bool enter_setup_flag = preferences.getBool("setup_mode", false); // check if the flag is set
 
   if (enter_setup_flag) { // if the flag was set before rebooting
-    DEBUG_MAIN_PRINTLN("[DEBUG] SETUP MODE FLAG is HIGH.");
-    isSetupMode = true; // enter setup mode
-    preferences.putBool("setup_mode", false); // clear the flag for the next boot
+    DEBUG_MAIN_PRINTLN("[DEBUG] SETUP MODE FLAG is HIGH."); isSetupMode = true; // enter setup mode
+    //preferences.putBool("setup_mode", false); // clear the flag for the next boot
   }
 
   if (digitalRead(SETUP_BUTTON_PIN) == LOW) {
     if (MAIN_DEBUG) {
-      Serial.println("[INFO] IO0 pin is LOW. Waiting for it to go HIGH to start Normal Mode...");
-    }
+      Serial.println("[INFO] IO0 pin is LOW. Waiting for it to go HIGH to start Normal Mode..."); }
     while(digitalRead(SETUP_BUTTON_PIN) == LOW) {
       delay(100);
-      if (MAIN_DEBUG) Serial.print(".");
-    }
-    if (MAIN_DEBUG) Serial.println("\n[INFO] IO0 is now HIGH. Continuing boot.");
-  }
+      if (MAIN_DEBUG) Serial.print("."); }
+    if (MAIN_DEBUG) Serial.println("\n[INFO] IO0 is now HIGH. Continuing boot."); }
 
   // initialize subsystems based on the selected mode
   if (isSetupMode) {
-    DEBUG_MAIN_PRINTLN("[MODE] SETUP MODE ACTIVATED.");
-    if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
-    dashboard.begin();
-  } else {
+    DEBUG_MAIN_PRINTLN("[MODE] SETUP MODE ACTIVATED."); if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
+    dashboard.begin(); } else {
     DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED.");
     sensors.begin(); // initialize sensors
     if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
@@ -194,20 +197,17 @@ void setup() {
     DEBUG_MAIN_PRINT("[ACTION] Connecting to WiFi in setup");
     int connection_timeout = 30; // wait for ~15 seconds
     while (WiFi.status() != WL_CONNECTED && connection_timeout > 0) {
-        delay(500);
-        DEBUG_MAIN_PRINT(".");
+        delay(500); DEBUG_MAIN_PRINT(".");
         connection_timeout--;
     }
 
     // Initialize MQTT only if WiFi is connected
     if (WiFi.status() == WL_CONNECTED) {
-        DEBUG_MAIN_PRINTLN("\n[INFO] WiFi connected successfully in setup.");
-        mqtt.onDataRequest(handleDataRequest); // register the data request callback
+        DEBUG_MAIN_PRINTLN("\n[INFO] WiFi connected successfully in setup."); mqtt.onDataRequest(handleDataRequest); // register the data request callback
         mqtt.onConfig(handleConfig); // register the config callback
         mqtt.begin(); // initialize mqtt client
     } else {
-        DEBUG_MAIN_PRINTLN("\n[WARN] WiFi connection failed in setup.");
-    }
+        DEBUG_MAIN_PRINTLN("\n[WARN] WiFi connection failed in setup."); }
   }
 
   pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
@@ -216,46 +216,44 @@ void setup() {
 void loop() {
   if (isSetupMode) {
     // --- Setup Mode Loop ---
+    mqtt.loop();
     dashboard.loop(); // continuously handle web server requests
 
     // check for a long button press to exit setup mode
-    static unsigned long buttonPressStartTime = 0;
-    bool buttonPressed = (digitalRead(SETUP_BUTTON_PIN) == LOW);
+    static unsigned long buttonPressStartTime = 0; bool buttonPressed = (digitalRead(SETUP_BUTTON_PIN) == LOW);
     if (buttonPressed) {
-      DEBUG_MAIN_PRINTLN("[DEBUG] button press detected!");
-      if (buttonPressStartTime == 0) { buttonPressStartTime = millis(); }
+      DEBUG_MAIN_PRINTLN("[DEBUG] button press detected!"); if (buttonPressStartTime == 0) { buttonPressStartTime = millis(); }
       else if (millis() - buttonPressStartTime > 3000) {
-        DEBUG_MAIN_PRINTLN("[ACTION] Exiting Setup mode via button press. Restarting...");
-        ESP.restart();
+        DEBUG_MAIN_PRINTLN("[ACTION] Exiting Setup mode via button press. Restarting..."); ESP.restart();
       }
     } else {
-      buttonPressStartTime = 0;
-    }
+      buttonPressStartTime = 0; }
 
     if (millis() > SETUP_MODE_TIMEOUT) { // check for the 10-minute timeout
-      DEBUG_MAIN_PRINTLN("[WARN] Setup mode timed out. Restarting...");
+      DEBUG_MAIN_PRINTLN("[WARN] Setup mode timed out. Restarting..."); 
+      preferences.putBool("setup_mode", false); // clear the flag for the next boot
       ESP.restart(); // reboot into normal mode
     }
   } else {
     // --- Normal Mode: Sense, Transmit, Sleep ---
 
     if (WiFi.status() == WL_CONNECTED) { // if wifi connected successfully
-      DEBUG_MAIN_PRINTLN("[INFO] WiFi Connected.");
-
-      // mqtt.loop() handles timed reconnection and returns status
+      DEBUG_MAIN_PRINTLN("[INFO] WiFi Connected."); // mqtt.loop() handles timed reconnection and returns status
       if (mqtt.loop()) {
-          DEBUG_MAIN_PRINTLN("[INFO] MQTT broker connected.");
-          
-          //sensors.readAllSensors();
+          DEBUG_MAIN_PRINTLN("[INFO] MQTT broker connected."); 
+          //sensors.readAllSensors(); // logic now handled by specific send functions
           //sendSensorData();
-    
-          // check if it's time to capture and send a photo
+          
           unsigned long sense_interval = powerManager.getSenseInterval();
           unsigned long cam_interval = powerManager.getCamInterval();
+          
+          // Always send sensor data on wakeup in normal mode
+          //sendSensorData();
+          
           if (cam_interval > 0 && sense_interval > 0) { // prevent division by zero
-            int sense_cycles_per_cam = cam_interval / sense_interval;
+            int sense_cycles_per_cam = cam_interval / sense_interval; 
             if (bootCount % sense_cycles_per_cam == 0) {
-                //sendCameraData();
+                //sendCameraData(); 
             }
           }
           delay(2000); // wait for data to be sent before sleeping
@@ -263,7 +261,6 @@ void loop() {
           // MQTT connection failed after retries in MQTT.h
           DEBUG_MAIN_PRINTLN("\n[ERROR] Failed to connect to MQTT broker, entering setup mode on next boot.");
           preferences.putBool("setup_mode", true);
-          ESP.restart();
       }
       
     } else {
@@ -273,9 +270,7 @@ void loop() {
 
     unsigned long sleep_duration_seconds = powerManager.getSenseInterval(); // get the sleep duration
     DEBUG_MAIN_PRINT("[ACTION] Entering deep sleep for ");
-    DEBUG_MAIN_PRINT(sleep_duration_seconds); DEBUG_MAIN_PRINTLN(" seconds.");
-
-    // configure wakeup sources
+    DEBUG_MAIN_PRINT(sleep_duration_seconds); DEBUG_MAIN_PRINTLN(" seconds."); // configure wakeup sources
     esp_sleep_enable_timer_wakeup(sleep_duration_seconds * 1000000ULL); // set the wakeup timer
     esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0); // enable wakeup on button press
 
