@@ -27,24 +27,29 @@ private:
     String _confTopic;          // topic for subscribing to configs
     String _last_ccu_address;   // stores the last known ccu address
 
-    void reconnect() { // handles mqtt reconnection logic
-        while (!_mqttClient.connected()) { // loop until we're reconnected
-            if (_debug_enabled) { Serial.print("Attempting MQTT connection..."); }
+    // returns true on success, false on failure after retries
+    bool reconnect() {
+        byte retries = 5; // try to connect 5 times
+        while (!_mqttClient.connected()) {
+            if (retries == 0) { // if retries are exhausted
+                if (_debug_enabled) { Serial.println(" [ERROR] Failed to connect to MQTT broker after multiple retries."); }
+                return false; // give up and return failure
+            }
+
+            if (_debug_enabled) { Serial.printf("Attempting MQTT connection... (%d retries left)\n", retries); }
+            
             if ((*_p_ccu_address).isEmpty()) { // if ccu address is not set
                 if (_debug_enabled) { Serial.println(" CCU address not set. Retrying in 5 seconds..."); }
                 delay(5000); // wait and retry
+                retries--;
                 continue;    // skip the rest of the loop
             }
 
             if (_mqttClient.connect(_device_id.c_str())) { // attempt to connect
                 if (_debug_enabled) { Serial.println("connected"); }
                 _mqttClient.subscribe(_reqTopic.c_str());    // subscribe to request topic
-                _mqttClient.subscribe(_confTopic.c_str());    // subscribe to config topic
-                if (_debug_enabled) { // if debug is on
-                    Serial.println("Subscribed to topics: ");
-                    Serial.println(_reqTopic);
-                    Serial.println(_confTopic);
-                }
+                _mqttClient.subscribe(_confTopic.c_str());   // subscribe to config topic
+                return true; // connection successful
             } else { // if connection failed
                 if (_debug_enabled) {
                     Serial.print("failed, rc=");
@@ -52,9 +57,12 @@ private:
                     Serial.println(" try again in 5 seconds");
                 }
                 delay(5000); // wait 5 seconds before retrying
+                retries--;
             }
         }
+        return true; // already connected if loop is not entered
     }
+
 
     void internalCallback(char* topic, byte* payload, unsigned int length) { // receives all messages from broker
         String topicStr = String(topic); // convert topic to string
@@ -119,8 +127,9 @@ public:
         }
     }
 
-    void loop() { // must be called in the main loop()
-        if ((*_p_ccu_address).isEmpty()) return; // do nothing if ccu address is not set
+    // returns true if connected, false if connection fails after retries
+    bool loop() {
+        if ((*_p_ccu_address).isEmpty()) return false; // do nothing if ccu address is not set
 
         if (*_p_ccu_address != _last_ccu_address) { // if the server address has changed in the dashboard
             if (_debug_enabled) { Serial.println("CCU address has changed. Reconfiguring MQTT client."); }
@@ -132,10 +141,14 @@ public:
         }
 
         if (!_mqttClient.connected()) { // if not connected
-            reconnect(); // try to reconnect
+            if (!reconnect()) { // try to reconnect
+                return false; // return failure if reconnect itself fails after retries
+            }
         }
         _mqttClient.loop(); // process incoming messages and maintain connection
+        return _mqttClient.connected();
     }
+
 
     void publishData(const String& jsonPayload) { // publishes sensor data to the data topic
         if (_mqttClient.connected()) { // if connected

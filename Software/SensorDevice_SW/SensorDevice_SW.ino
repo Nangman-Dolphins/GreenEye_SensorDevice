@@ -241,29 +241,39 @@ void loop() {
 
     if (WiFi.status() == WL_CONNECTED) { // if wifi connected successfully
       DEBUG_MAIN_PRINTLN("[INFO] WiFi Connected.");
-      mqtt.loop(); // connect to mqtt and process any initial messages
 
-      //sensors.readAllSensors(); // read all sensor values
-      //sendSensorData(); // send the sensor data via mqtt
-
-      // check if it's time to capture and send a photo
-      unsigned long sense_interval = powerManager.getSenseInterval();
-      unsigned long cam_interval = powerManager.getCamInterval();
-      if (cam_interval > 0 && sense_interval > 0) { // prevent division by zero
-        int sense_cycles_per_cam = cam_interval / sense_interval; // calculate how many sensor cycles per camera cycle
-        if (bootCount % sense_cycles_per_cam == 0) { // if it's time for a photo
-            //sendCameraData(); // capture and send the photo
-        }
+      // mqtt.loop() handles timed reconnection and returns status
+      if (mqtt.loop()) {
+          DEBUG_MAIN_PRINTLN("[INFO] MQTT broker connected.");
+          
+          //sensors.readAllSensors();
+          //sendSensorData();
+    
+          // check if it's time to capture and send a photo
+          unsigned long sense_interval = powerManager.getSenseInterval();
+          unsigned long cam_interval = powerManager.getCamInterval();
+          if (cam_interval > 0 && sense_interval > 0) { // prevent division by zero
+            int sense_cycles_per_cam = cam_interval / sense_interval;
+            if (bootCount % sense_cycles_per_cam == 0) {
+                //sendCameraData();
+            }
+          }
+          delay(2000); // wait for data to be sent before sleeping
+      } else {
+          // MQTT connection failed after retries in MQTT.h
+          DEBUG_MAIN_PRINTLN("\n[ERROR] Failed to connect to MQTT broker, entering setup mode on next boot.");
+          preferences.putBool("setup_mode", true);
+          ESP.restart();
       }
-      delay(2000); // wait for data to be sent before sleeping
+      
     } else {
-      DEBUG_MAIN_PRINTLN("\n[ERROR] Failed to connect to WiFi.");
-      // if wi-fi connection fails, it might be good to enter setup mode on next boot
+      DEBUG_MAIN_PRINTLN("\n[ERROR] Failed to connect to WiFi, entering setup mode on next boot.");
       preferences.putBool("setup_mode", true);
     }
 
     unsigned long sleep_duration_seconds = powerManager.getSenseInterval(); // get the sleep duration
-    DEBUG_MAIN_PRINT("[ACTION] Entering deep sleep for "); DEBUG_MAIN_PRINT(sleep_duration_seconds); DEBUG_MAIN_PRINTLN(" seconds.");
+    DEBUG_MAIN_PRINT("[ACTION] Entering deep sleep for ");
+    DEBUG_MAIN_PRINT(sleep_duration_seconds); DEBUG_MAIN_PRINTLN(" seconds.");
 
     // configure wakeup sources
     esp_sleep_enable_timer_wakeup(sleep_duration_seconds * 1000000ULL); // set the wakeup timer
@@ -271,5 +281,4 @@ void loop() {
 
     esp_deep_sleep_start(); // enter deep sleep
   }
-
 }
