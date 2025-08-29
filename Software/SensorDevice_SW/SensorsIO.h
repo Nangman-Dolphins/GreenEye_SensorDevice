@@ -65,8 +65,7 @@ private:
     }
 
     float getCalibratedEC(float adc_value) {
-        // Python 코드의 교정 데이터와 동일
-        const int NUM_CAL_POINTS = 10;
+        const int NUM_CAL_POINTS = 9;
         const float adc_points[NUM_CAL_POINTS] = {
             310.4, 574.8, 657.9, 931.5, 1069.7, 1112.9, 1158.6, 1425.7, 1489.7
         };
@@ -396,15 +395,15 @@ public:
 
     void readAllSensors(int rawMode = 0) {
         if (_debug_enabled) { Serial.println("\n[SensorIO] --- Starting Full Sensor Read Cycle ---"); }
+        readAmbientTempHumi();
+        delay(50);
+        readLight();
+        delay(50);
         readSoilTemp(rawMode);
         delay(50);
         readSoilEC(rawMode);
         delay(50);
         readBatteryLevel(rawMode);
-        delay(50);
-        readAmbientTempHumi();
-        delay(50);
-        readLight();
         delay(50);
         readSoilMoisture(rawMode);
         if (_debug_enabled) { Serial.println("[SensorIO] --- Sensor Read Cycle Complete ---"); }
