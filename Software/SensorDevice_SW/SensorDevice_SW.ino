@@ -102,10 +102,10 @@ void handleWakeupReason(){
 
 void sendSensorData() {
     //sensors.readAllSensors(); // Make sure sensor data is fresh before sending
-    mqtt.loop();
     if (!dashboard.isConnected()) { // check if connected to wifi
         DEBUG_MAIN_PRINTLN("[WARN] Not connected to WiFi, cannot send data."); return; // exit if not connected
     }
+    
     JsonDocument dataDoc; // create a json document
     dataDoc["bat_level"] = battery_level; // add battery level to json
     dataDoc["amb_temp"] = ambient_temp; // add ambient temperature to json
@@ -116,20 +116,23 @@ void sendSensorData() {
     dataDoc["soil_ec"] = soil_ec; // add soil ec to json
     String output; // create a string to hold the json
     serializeJson(dataDoc, output); // convert json to string
+    print_memory_status("Sensor data JSON creation");
+    mqtt.loop();
     mqtt.publishData(output);       // publish the data
 }
 
 void sendCameraData() {
     if (!dashboard.isConnected()) return; // exit if not connected
-    
+
+    print_memory_status("Before capture frame");
     DEBUG_MAIN_PRINTLN("[ACTION] Capturing high quality frame to send...");
     camera_fb_t* fb = camera.captureFrameForAnalyze(); // capture a high quality frame
 
     if (fb) { // if frame capture was successful
         DEBUG_MAIN_PRINTLN("[DEBUG] Frame captured successfully.");
+        print_memory_status("After capture frame");
 
         size_t output_len; 
-        
         // calculate the required buffer size
         mbedtls_base64_encode(NULL, 0, &output_len, fb->buf, fb->len);
         
@@ -159,11 +162,10 @@ void sendCameraData() {
         mqtt.publishData(output); // publish the data
         
         free(base64_buf);
-        camera.releaseFrameForAnalyze(fb); // release the frame buffer
-
     } else {
         DEBUG_MAIN_PRINTLN("[ERROR] Failed to capture high quality frame for sending.");
     }
+    camera.releaseFrameForAnalyze(fb); // release the frame buffer
 }
 
 // wrapper function to send both sensor and camera data
@@ -187,6 +189,23 @@ void handleConfig(JsonDocument& doc, PowerManager& pm) {
         bool nht_mode = doc["nht_mode"].as<bool>(); // get the boolean value
         pm.setNightMode(nht_mode); // set the new night mode
     }
+}
+
+void print_memory_status(const char* step) {
+    DEBUG_MAIN_PRINT("--- Memory Status after ");
+    DEBUG_MAIN_PRINT(step);
+    DEBUG_MAIN_PRINTLN(" ---");
+    DEBUG_MAIN_PRINT("Free Heap: ");
+    DEBUG_MAIN_PRINT(ESP.getFreeHeap());
+    DEBUG_MAIN_PRINTLN(" bytes");
+    if (psramFound()) {
+        DEBUG_MAIN_PRINT("Free PSRAM: ");
+        DEBUG_MAIN_PRINT(ESP.getFreePsram());
+        DEBUG_MAIN_PRINTLN(" bytes");
+    } else {
+        DEBUG_MAIN_PRINTLN("No PSRAM found!");
+    }
+    DEBUG_MAIN_PRINTLN("--------------------------------------");
 }
 
 void setup() {
@@ -223,6 +242,7 @@ void setup() {
 
   // initialize subsystems based on the selected mode
   sensors.begin(); // initialize sensors 
+  print_memory_status("After sensors init");
 
   if (isSetupMode) {
     DEBUG_MAIN_PRINTLN("[MODE] SETUP MODE ACTIVATED."); 
@@ -231,8 +251,9 @@ void setup() {
     DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED.");
     dashboard.beginWiFi(); // wifi only
   }
+  print_memory_status("After dashboard init");
+
   DEBUG_MAIN_PRINT("[ACTION] Connecting to WiFi");
-  
   int connection_timeout = 30; // wait for ~15 seconds
   while (WiFi.status() != WL_CONNECTED && connection_timeout > 0) {
       delay(500); DEBUG_MAIN_PRINT(".");
@@ -241,16 +262,18 @@ void setup() {
   DEBUG_MAIN_PRINTLN("Complete!");
 
   if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
+  print_memory_status("After camera init");
 
   // Initialize MQTT only if WiFi is connected
-    if (WiFi.status() == WL_CONNECTED) {
-        DEBUG_MAIN_PRINTLN("\n[INFO] MQTT Initialize."); 
-        mqtt.onDataRequest(handleDataRequest); // register the data request callback
-        mqtt.onConfig(handleConfig); // register the config callback
-        mqtt.begin(); // initialize mqtt client
-    } else {
-        DEBUG_MAIN_PRINTLN("\n[WARN] WiFi connection failed in setup."); 
-    }
+  if (WiFi.status() == WL_CONNECTED) {
+      DEBUG_MAIN_PRINTLN("\n[INFO] MQTT Initialize."); 
+      mqtt.onDataRequest(handleDataRequest); // register the data request callback
+      mqtt.onConfig(handleConfig); // register the config callback
+      mqtt.begin(); // initialize mqtt client
+  } else {
+      DEBUG_MAIN_PRINTLN("\n[WARN] WiFi connection failed in setup."); 
+  }
+  print_memory_status("After WiFi init");
 
   pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
 }
