@@ -185,13 +185,12 @@ void setup() {
   if (isSetupMode) {
     DEBUG_MAIN_PRINTLN("[MODE] SETUP MODE ACTIVATED.");
     if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
-    dashboard.beginWiFi();
-    dashboard.beginWebServer(); // initialize dashboard (web server)
+    dashboard.begin();
   } else {
     DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED.");
     sensors.begin(); // initialize sensors
     if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
-    dashboard.beginWiFi(); 
+    dashboard.beginWiFi(); // wifi only
     DEBUG_MAIN_PRINT("[ACTION] Connecting to WiFi in setup");
     int connection_timeout = 30; // wait for ~15 seconds
     while (WiFi.status() != WL_CONNECTED && connection_timeout > 0) {
