@@ -186,10 +186,10 @@ p{color:#555;font-size:1.1rem;}
 </body></html>
 )rawliteral";
 
-static const char CCU_SAVE_SUCCESS_PAGE_HTML[] PROGMEM = R"rawliteral(
+static const char SAVE_SUCCESS_PAGE_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="refresh" content="3; url=/">
-<title>CCU 주소 저장됨</title>
+<title>설정 반영됨</title>
 <style>
 body{font-family:Arial,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background-color:#f0f2f5;margin:0}
 .container{background-color:#fff;padding:3rem;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.1);text-align:center}
@@ -197,7 +197,7 @@ h1{color:#128037;margin-bottom:1rem;}
 p{color:#555;font-size:1.1rem;}
 </style></head>
 <body><div class="container">
-<h1>저장 완료!</h1><p>CCU 주소가 저장되었습니다.<br>잠시 후 메인 페이지로 돌아갑니다...</p>
+<h1>저장 완료!</h1><p>설정이 반영되었습니다.<br>잠시 후 메인 페이지로 돌아갑니다...</p>
 </div></body></html>
 )rawliteral";
 
@@ -466,7 +466,7 @@ private:
             *_p_ccu_address = new_ccu_address; // update the variable in the main sketch
         }
         if (_debug_enabled) { Serial.println("[INFO] CCU address saved."); }
-        _server.send_P(200, "text/html", CCU_SAVE_SUCCESS_PAGE_HTML); // send confirmation page
+        _server.send_P(200, "text/html", SAVE_SUCCESS_PAGE_HTML); // send confirmation page
     }
 
     void handleSave() {
@@ -530,8 +530,7 @@ private:
             if (_debug_enabled) { Serial.print("[ACTION] Setting power mode to: "); Serial.println(modeStr[0]); }
             _p_power_manager->setMode(modeStr[0]);
         }
-        _server.sendHeader("Location", "/debug");
-        _server.send(302, "text/plain", "Power mode set. Redirecting...");
+        _server.send_P(200, "text/html", SAVE_SUCCESS_PAGE_HTML); // send confirmation page
     }
 
     void handleSetNightMode() {
@@ -540,7 +539,6 @@ private:
             if (_debug_enabled) { Serial.print("[ACTION] Setting night mode to: "); Serial.println(nightMode ? "ON" : "OFF"); }
             _p_power_manager->setNightMode(nightMode);
         }
-        _server.sendHeader("Location", "/debug");
-        _server.send(302, "text/plain", "Night mode set. Redirecting...");
+        _server.send_P(200, "text/html", SAVE_SUCCESS_PAGE_HTML); // send confirmation page
     }
 };
