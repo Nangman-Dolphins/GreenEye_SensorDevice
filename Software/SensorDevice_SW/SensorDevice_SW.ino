@@ -101,6 +101,7 @@ void handleWakeupReason(){
 
 void sendSensorData() {
     sensors.readAllSensors(); // Make sure sensor data is fresh before sending
+    mqtt.loop();
     if (!dashboard.isConnected()) { // check if connected to wifi
         DEBUG_MAIN_PRINTLN("[WARN] Not connected to WiFi, cannot send data."); return; // exit if not connected
     }
@@ -122,10 +123,13 @@ void sendCameraData() {
     DEBUG_MAIN_PRINTLN("[ACTION] Capturing high quality frame to send...");
     camera_fb_t* fb = camera.captureFrameForAnalyze(); // capture a high quality frame
     if (fb) { // if frame capture was successful
-        DEBUG_MAIN_PRINTLN("[DEBUG] Frame captured successfully."); JsonDocument dataDoc; // create json document
-        // note: for actual use, the frame buffer (fb->buf) should be Base64 encoded here
-        dataDoc["plant_img"] = "base64-encoded-image-placeholder"; String output; // create string for json
+        DEBUG_MAIN_PRINTLN("[DEBUG] Frame captured successfully."); 
+        JsonDocument dataDoc; // create json document
+        // TODO base32 incoding
+        dataDoc["plant_img"] = "base64-encoded-image-placeholder"; 
+        String output; // create string for json
         serializeJson(dataDoc, output); // convert json to string
+        mqtt.loop();
         mqtt.publishData(output); // publish the image data
         camera.releaseFrameForAnalyze(fb); // release the frame buffer
     } else {
@@ -179,12 +183,13 @@ void setup() {
   }
 
   if (digitalRead(SETUP_BUTTON_PIN) == LOW) {
-    if (MAIN_DEBUG) {
-      Serial.println("[INFO] IO0 pin is LOW. Waiting for it to go HIGH to start Normal Mode..."); }
+    DEBUG_MAIN_PRINTLN("[INFO] IO0 pin is LOW. Waiting for it to go HIGH to start Normal Mode..."); 
     while(digitalRead(SETUP_BUTTON_PIN) == LOW) {
       delay(100);
-      if (MAIN_DEBUG) Serial.print("."); }
-    if (MAIN_DEBUG) Serial.println("\n[INFO] IO0 is now HIGH. Continuing boot."); }
+      DEBUG_MAIN_PRINT("."); 
+    }
+    DEBUG_MAIN_PRINTLN("\n[INFO] IO0 is now HIGH. Continuing boot."); 
+  } 
 
   // initialize subsystems based on the selected mode
   if (isSetupMode) {
@@ -203,7 +208,8 @@ void setup() {
 
     // Initialize MQTT only if WiFi is connected
     if (WiFi.status() == WL_CONNECTED) {
-        DEBUG_MAIN_PRINTLN("\n[INFO] WiFi connected successfully in setup."); mqtt.onDataRequest(handleDataRequest); // register the data request callback
+        DEBUG_MAIN_PRINTLN("\n[INFO] WiFi connected successfully in setup."); 
+        mqtt.onDataRequest(handleDataRequest); // register the data request callback
         mqtt.onConfig(handleConfig); // register the config callback
         mqtt.begin(); // initialize mqtt client
     } else {
@@ -216,7 +222,6 @@ void setup() {
 void loop() {
   if (isSetupMode) {
     // --- Setup Mode Loop ---
-    mqtt.loop();
     dashboard.loop(); // continuously handle web server requests
 
     // check for a long button press to exit setup mode
