@@ -57,7 +57,7 @@ public:
       // set default resolution
       config.frame_size = FRAMESIZE_240X240; // 240x240 (default)
       config.jpeg_quality = DFT_QUALITY;  // 0-63, lower number means higher quality  (default)
-      config.fb_count = 1;                // use 2 frame buffers for stability  (default)
+      config.fb_count = 2;                // use 2 frame buffers for stability  (default)
     }
 
     bool begin() {
@@ -95,12 +95,10 @@ public:
 
             // --- Special Effects ---
             s->set_special_effect(s, 0);         // no special effects
-            
-            Serial.println("Custom camera settings applied.");
+
         } else {
-            Serial.println("Failed to get camera sensor.");
+            return false;
         }
-        esp_camera_fb_return(NULL);
         return true; // return true on success
     }
 
