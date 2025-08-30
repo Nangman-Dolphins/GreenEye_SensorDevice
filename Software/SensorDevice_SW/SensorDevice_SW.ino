@@ -7,9 +7,10 @@
 #include "MQTT.h"         // include the mqtt client class
 #include <Preferences.h>  // include for using the setup mode flag
 #include "mbedtls/base64.h" // include for base64 incoding
+#include "driver/rtc_io.h"
 
 // === Main Debug Switch ===
-#define MAIN_DEBUG 1 // set to 1 to enable detailed logs from this file, 0 to disable
+#define MAIN_DEBUG 0 // set to 1 to enable detailed logs from this file, 0 to disable
 
 #if MAIN_DEBUG == 1
   #define DEBUG_MAIN_PRINT(x) Serial.print(x)
@@ -20,7 +21,12 @@
 #endif
 
 // --- Pin for entering Setup Mode ---
-#define SETUP_BUTTON_PIN 3 // IO0 pin is used to enter setup mode
+#define SETUP_BUTTON_PIN 2 // IO2 pin is used to enter setup mode
+const uint64_t WAKEUP_PIN_BITMASK = 1ULL << SETUP_BUTTON_PIN;
+const int FLASH_PIN = 4;
+const int LEDC_CHANNEL = 1; // LEDC Channel
+const int LEDC_FREQ = 5000;   // PWM Freq
+const int LEDC_RESOLUTION = 8; // 8bit Res
 
 // --- Forward declarations for callbacks ---
 void sendSensorData();
@@ -29,13 +35,13 @@ void sendAllData();
 // --- Global Variables & Objects ---
 RTC_DATA_ATTR int bootCount = 0; // a counter that survives deep sleep
 
-int   battery_level    = 0; // holds the battery level percentage
-float ambient_temp     = 0.0;  // holds ambient temperature
-float ambient_humidity = 0.0; // holds ambient humidity
-float light_intensity  = 0.0;  // holds light intensity
-float soil_temp        = 0.0; // holds soil temperature
-float soil_moisture    = 0.0; // holds soil moisture
-float soil_ec          = 0.0; // holds soil electrical conductivity
+int   battery_level    = 1; // holds the battery level percentage
+float ambient_temp     = 2.0;  // holds ambient temperature
+float ambient_humidity = 3.0; // holds ambient humidity
+float light_intensity  = 4.0;  // holds light intensity
+float soil_temp        = 5.0; // holds soil temperature
+float soil_moisture    = 60.0; // holds soil moisture
+float soil_ec          = 7.0; // holds soil electrical conductivity
 String ccu_address     = "";   // holds the ccu address
 
 PowerManager powerManager(MAIN_DEBUG); // create the power manager object
@@ -106,7 +112,7 @@ void sendSensorData() {
   }
   
   delay(250); // for stabilize
-  sensors.readAllSensors(); // Make sure sensor data is fresh before sending
+  //sensors.readAllSensors(); // Make sure sensor data is fresh before sending
 
   JsonDocument dataDoc; // create a json document
   dataDoc["bat_level"] = battery_level; // add battery level to json
@@ -213,8 +219,14 @@ void print_memory_status(const char* step) {
 }
 
 void setup() {
-  Serial.begin(115200); // initialize serial communication
-  delay(1000); // wait for serial monitor to open
+  ledcSetup(LEDC_CHANNEL, LEDC_FREQ, LEDC_RESOLUTION);
+  ledcAttachPin(FLASH_PIN, LEDC_CHANNEL);
+  ledcWrite(LEDC_CHANNEL, 10);
+
+  if(MAIN_DEBUG){
+    Serial.begin(115200); // initialize serial communication
+    delay(1000); // wait for serial monitor to open
+  }
 
   if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
   print_memory_status("After camera init");
@@ -241,9 +253,15 @@ void setup() {
   // initialize subsystems based on the selected mode
   if (isSetupMode) {
     DEBUG_MAIN_PRINTLN("[MODE] SETUP MODE ACTIVATED."); 
+    ledcWrite(LEDC_CHANNEL, 0); delay(500);
+    ledcWrite(LEDC_CHANNEL, 10); delay(500);
+    ledcWrite(LEDC_CHANNEL, 0); delay(500);
+    ledcWrite(LEDC_CHANNEL, 10);
     dashboard.begin(); 
   } else {
-    DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED.");
+    DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED."); 
+    ledcWrite(LEDC_CHANNEL, 0); delay(500);
+    ledcWrite(LEDC_CHANNEL, 10); 
     dashboard.beginWiFi(); // wifi only
   }
   print_memory_status("After dashboard init");
@@ -256,10 +274,8 @@ void setup() {
   }
   DEBUG_MAIN_PRINTLN("Complete!");
 
-  
   sensors.begin(); // initialize sensors 
   print_memory_status("After sensors init");
-  
 
   // Initialize MQTT only if WiFi is connected
   if (WiFi.status() == WL_CONNECTED) {
@@ -274,10 +290,11 @@ void setup() {
 }
 
 void loop() {
-
+  
   if (isSetupMode) {
     // --- Setup Mode Loop ---
     dashboard.loop(); // continuously handle web server requests
+    mqtt.loop();
 
     // check for a long button press to exit setup mode
     static unsigned long buttonPressStartTime = 0; bool buttonPressed = (digitalRead(SETUP_BUTTON_PIN) == LOW);
@@ -299,7 +316,7 @@ void loop() {
     
   } else {
     // --- Normal Mode: Sense, Transmit, Sleep ---
-
+    ledcWrite(LEDC_CHANNEL, 0);
     if (WiFi.status() == WL_CONNECTED) { // if wifi connected successfully
       DEBUG_MAIN_PRINTLN("[INFO] WiFi Connected."); // mqtt.loop() handles timed reconnection and returns status
       if (mqtt.loop()) {
@@ -332,8 +349,12 @@ void loop() {
     unsigned long sleep_duration_seconds = powerManager.getSenseInterval(); // get the sleep duration
     DEBUG_MAIN_PRINT("[ACTION] Entering deep sleep for ");
     DEBUG_MAIN_PRINT(sleep_duration_seconds); DEBUG_MAIN_PRINTLN(" seconds."); // configure wakeup sources
+    Wire.end();
+    rtc_gpio_pullup_en(GPIO_NUM_2);
+    rtc_gpio_pulldown_dis(GPIO_NUM_2);
+    delay(1000);
     esp_sleep_enable_timer_wakeup(sleep_duration_seconds * 1000000ULL); // set the wakeup timer
-    esp_sleep_enable_ext0_wakeup(GPIO_NUM_3, 0); // enable wakeup on button press
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_2, 0); // enable wakeup on button press
 
     esp_deep_sleep_start(); // enter deep sleep
   }
