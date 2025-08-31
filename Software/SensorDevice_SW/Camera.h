@@ -21,7 +21,7 @@
 #define PCLK_GPIO_NUM     22
 
 #define DFT_QUALITY       15 // default quality for streaming
-#define HIGH_QUALITY      5  // high quality for analysis
+#define HIGH_QUALITY      3  // high quality for analysis
 
 
 class Camera {
@@ -50,7 +50,7 @@ public:
       config.pin_sccb_scl = SIOC_GPIO_NUM;
       config.pin_pwdn = PWDN_GPIO_NUM;
       config.pin_reset = RESET_GPIO_NUM;
-      config.xclk_freq_hz = 10000000;
+      config.xclk_freq_hz = 20000000;
       config.pixel_format = PIXFORMAT_JPEG; // use jpeg format for streaming
       config.fb_location = CAMERA_FB_IN_PSRAM;
       
@@ -81,17 +81,17 @@ public:
 
             // --- Exposure & Brightness ---
             s->set_exposure_ctrl(s, 1);          // enable auto exposure control
-            s->set_aec_value(s, 500);            // set exposure value
+            s->set_aec_value(s, 200);            // set exposure value
             s->set_gain_ctrl(s, 1);              // enable auto gain control
-            s->set_agc_gain(s, 0);               // set gain level
-            s->set_brightness(s, 1);             // set brightness
+            s->set_agc_gain(s, 10);               // set gain level
+            s->set_brightness(s, -1);             // set brightness
 
             // --- Color & White Balance ---
             s->set_whitebal(s, 1);               // enable auto white balance
             s->set_awb_gain(s, 1);               // enable auto white balance gain
             s->set_wb_mode(s, 0);                // set white balance mode to auto
-            s->set_saturation(s, 1);             // set saturation
-            s->set_contrast(s, 0);               // set contrast
+            s->set_saturation(s, 2);             // set saturation
+            s->set_contrast(s, 2);               // set contrast
 
             // --- Special Effects ---
             s->set_special_effect(s, 0);         // no special effects

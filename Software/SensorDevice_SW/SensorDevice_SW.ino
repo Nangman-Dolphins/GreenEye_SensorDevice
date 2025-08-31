@@ -22,7 +22,7 @@
 
 // --- Pin for entering Setup Mode ---
 #define SETUP_BUTTON_PIN 2 // IO2 pin is used to enter setup mode
-const uint64_t WAKEUP_PIN_BITMASK = 1ULL << SETUP_BUTTON_PIN;
+
 const int FLASH_PIN = 4;
 const int LEDC_CHANNEL = 1; // LEDC Channel
 const int LEDC_FREQ = 5000;   // PWM Freq
@@ -231,9 +231,7 @@ void setup() {
   if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
   print_memory_status("After camera init");
 
-  pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
-
-  DEBUG_MAIN_PRINTLN("[INFO] Waiting 2 seconds for IO3 pin to stabilize...");
+  DEBUG_MAIN_PRINTLN("[INFO] Waiting 2 seconds for IO4 pin to stabilize...");
   delay(2000); bootCount++; // increment the deep sleep wake-up counter
   DEBUG_MAIN_PRINT("[INFO] === Boot count: ");
   DEBUG_MAIN_PRINT(bootCount); DEBUG_MAIN_PRINTLN(" ===");
@@ -246,7 +244,8 @@ void setup() {
   bool enter_setup_flag = preferences.getBool("setup_mode", false); // check if the flag is set
 
   if (enter_setup_flag) { // if the flag was set before rebooting
-    DEBUG_MAIN_PRINTLN("[DEBUG] SETUP MODE FLAG is HIGH."); isSetupMode = true; // enter setup mode
+    DEBUG_MAIN_PRINTLN("[DEBUG] SETUP MODE FLAG is HIGH."); 
+    isSetupMode = true; // enter setup mode
     //preferences.putBool("setup_mode", false); // clear the flag for the next boot
   }
 
@@ -256,12 +255,16 @@ void setup() {
     ledcWrite(LEDC_CHANNEL, 0); delay(500);
     ledcWrite(LEDC_CHANNEL, 10); delay(500);
     ledcWrite(LEDC_CHANNEL, 0); delay(500);
-    ledcWrite(LEDC_CHANNEL, 10);
+    ledcWrite(LEDC_CHANNEL, 10); delay(500);
+    ledcWrite(LEDC_CHANNEL, 0); delay(500);
+    pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
     dashboard.begin(); 
+    sensors.begin(); // initialize sensors
   } else {
     DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED."); 
     ledcWrite(LEDC_CHANNEL, 0); delay(500);
     ledcWrite(LEDC_CHANNEL, 10); 
+    pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
     dashboard.beginWiFi(); // wifi only
   }
   print_memory_status("After dashboard init");
@@ -274,7 +277,6 @@ void setup() {
   }
   DEBUG_MAIN_PRINTLN("Complete!");
 
-  sensors.begin(); // initialize sensors 
   print_memory_status("After sensors init");
 
   // Initialize MQTT only if WiFi is connected
@@ -297,16 +299,19 @@ void loop() {
     mqtt.loop();
 
     // check for a long button press to exit setup mode
-    static unsigned long buttonPressStartTime = 0; bool buttonPressed = (digitalRead(SETUP_BUTTON_PIN) == LOW);
-    if (buttonPressed) {
-      DEBUG_MAIN_PRINTLN("[DEBUG] button press detected!"); if (buttonPressStartTime == 0) { buttonPressStartTime = millis(); }
-      else if (millis() - buttonPressStartTime > 3000) {
+    static unsigned long buttonPressStartTime = 0; 
+    if (digitalRead(SETUP_BUTTON_PIN) == LOW) {
+      DEBUG_MAIN_PRINTLN("[DEBUG] button press detected!"); 
+      if (buttonPressStartTime == 0) { 
+        buttonPressStartTime = millis();
+      } else if (millis() - buttonPressStartTime > 3000) {
         DEBUG_MAIN_PRINTLN("[ACTION] Exiting Setup mode via button press. Restarting..."); 
         preferences.putBool("setup_mode", false);
         ESP.restart();
       }
     } else {
-      buttonPressStartTime = 0; }
+      buttonPressStartTime = 0; 
+    }
 
     if (millis() > SETUP_MODE_TIMEOUT) { // check for the 10-minute timeout
       DEBUG_MAIN_PRINTLN("[WARN] Setup mode timed out. Restarting..."); 
