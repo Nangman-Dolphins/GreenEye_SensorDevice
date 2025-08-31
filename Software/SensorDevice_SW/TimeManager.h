@@ -1,74 +1,102 @@
 #pragma once // prevents multiple inclusion of the header file
-#include <Preferences.h> // for non-volatile storage
 
-enum PowerMode { // defines the available power modes
-    ULTRA_LOW_POWER, // z
-    LOW_POWER,       // l
-    NORMAL,          // m
-    HIGH_FREQ,       // h
-    ULTRA_HIGH_FREQ  // u
-};
+#include <WiFi.h>        // for wifi status check
+#include <NTPClient.h>   // for ntp time fetching
+#include <WiFiUdp.h>     // for ntp communication
 
-class PowerManager {
+class TimeManager {
 private:
-    PowerMode _currentMode;     // holds the current power mode
-    bool _nightModeEnabled;     // flag for night deep sleep mode
-    unsigned long _senseInterval; // interval for sensor reading in seconds
-    unsigned long _camInterval;   // interval for camera capture in seconds
-    Preferences _preferences;   // non-volatile storage handler
-
-    void updateIntervals() { // updates the intervals based on the current mode
-        switch (_currentMode) {
-            case ULTRA_LOW_POWER: _senseInterval = 2 * 3600; _camInterval = 4 * 3600; break;
-            case LOW_POWER:       _senseInterval = 1 * 3600; _camInterval = 2 * 3600; break;
-            case NORMAL:          _senseInterval = 30 * 60;  _camInterval = 1 * 3600; break;
-            case HIGH_FREQ:       _senseInterval = 20 * 60;  _camInterval = 1 * 3600; break;
-            case ULTRA_HIGH_FREQ: _senseInterval = 20 * 60;  _camInterval = 40 * 60;  break;
-        }
-        if (Serial) { // check if serial is initialized
-            Serial.printf("[PM] Mode updated. Sense interval: %lu s, Cam interval: %lu s\n", _senseInterval, _camInterval);
-        }
-    }
+    WiFiUDP _ntpUDP;              // udp client for ntp
+    NTPClient _timeClient;        // ntp client object
+    bool _time_synced = false;    // flag to check if time has been synced
+    bool _debug_enabled = false;  // flag for controlling debug prints
 
 public:
-    PowerManager() : 
-        _currentMode(NORMAL),        // set default power mode
-        _nightModeEnabled(true)      // enable night mode by default
+    // constructor initializes the ntp client
+    TimeManager(bool debug = false)
+        : _timeClient(_ntpUDP, "pool.ntp.org", 3600 * 9), // kst offset: 9 hours
+          _debug_enabled(debug)
     {}
 
-    void begin() { // loads saved settings from non-volatile storage
-        _preferences.begin("power-mgmt", false); // initialize preferences with a namespace
-        char savedMode = _preferences.getChar("pwr_mode", 'M'); // load saved mode, default to 'm'
-        _nightModeEnabled = _preferences.getBool("nht_mode", true); // load night mode setting, default to true
-        setMode(savedMode); // apply the loaded or default mode
-    }
-
-    void setMode(PowerMode newMode) { // sets a new power mode
-        _currentMode = newMode; // update the internal mode
-        updateIntervals(); // update the timing intervals
-    }
-
-    void setMode(char modeChar) { // sets a new power mode using a character
-        PowerMode newMode = _currentMode; // default to current mode
-        if (modeChar == 'Z') newMode = ULTRA_LOW_POWER;
-        else if (modeChar == 'L') newMode = LOW_POWER;
-        else if (modeChar == 'M') newMode = NORMAL;
-        else if (modeChar == 'H') newMode = HIGH_FREQ;
-        else if (modeChar == 'U') newMode = ULTRA_HIGH_FREQ;
-        
-        if (newMode != _currentMode) { // if the mode actually changed
-            setMode(newMode); // call the main setMode function
-            _preferences.putChar("pwr_mode", modeChar); // save the new mode to storage
+    // starts the ntp client
+    void begin() {
+        if (WiFi.status() == WL_CONNECTED) { // only begin if wifi is connected
+            _timeClient.begin();
+            if (_debug_enabled) { Serial.println("[TM] TimeManager initialized."); }
         }
     }
-    
-    void setNightMode(bool enabled) { // enables or disables night mode
-        _nightModeEnabled = enabled; // update the internal flag
-        _preferences.putBool("nht_mode", enabled); // save the setting to storage
-        if (Serial) { Serial.printf("[PM] Night mode set to: %s and saved.\n", enabled ? "ON" : "OFF"); }
+
+    // fetches the current time from the ntp server
+    bool updateTime() {
+        if (WiFi.status() != WL_CONNECTED) { // check for wifi connection
+            if (_debug_enabled) { Serial.println("[TM][ERROR] Cannot update time, WiFi not connected."); }
+            return false;
+        }
+        if (_timeClient.update()) { // attempt to update the time
+            _time_synced = true;
+            if (_debug_enabled) {
+                Serial.print("[TM] Time updated successfully: ");
+                Serial.println(getFormattedTime());
+            }
+            return true;
+        } else {
+            if (_debug_enabled) { Serial.println("[TM][WARN] Failed to update time from NTP server."); }
+            return false;
+        }
     }
 
-    unsigned long getSenseInterval() { return _senseInterval; } // returns the current sensor interval
-    unsigned long getCamInterval() { return _camInterval; }   // returns the current camera interval
-    bool isNightModeEnabled() { return _nightModeEnabled; }    // returns if night mode is enabled
+    // returns true if the current time is between 21:00 and 05:59
+    bool isNightTime() {
+        if (!_time_synced) { // if time has not been synced yet
+            if (_debug_enabled) { Serial.println("[TM][WARN] Time not synced, cannot determine if it's night."); }
+            updateTime(); // try to update time again
+            if (!_time_synced) return false; // if still not synced, assume it's not night to allow normal operation
+        }
+        int currentHour = _timeClient.getHours(); // get the current hour (0-23)
+        // night is from 9 pm (21) to 6 am (before 6)
+        return (currentHour >= 21 || currentHour < 6);
+    }
+    
+    // calculates how many seconds until 6 am
+    unsigned long getSecondsUntil6AM() {
+        if (!_time_synced) {
+            if (_debug_enabled) { Serial.println("[TM][WARN] Time not synced, returning default sleep interval."); }
+            // return a reasonable default if time is not available to avoid infinite sleep
+            return 3600; // 1 hour
+        }
+
+        int currentHour = _timeClient.getHours();
+        int currentMinute = _timeClient.getMinutes();
+        int currentSecond = _timeClient.getSeconds();
+
+        // calculate total seconds from the beginning of the day
+        long secondsPassedToday = currentHour * 3600L + currentMinute * 60L + currentSecond;
+
+        // target time is 6:00 am, which is 6 * 3600 = 21600 seconds from midnight
+        long targetSeconds = 6 * 3600L;
+
+        long secondsToSleep;
+
+        if (secondsPassedToday < targetSeconds) {
+            // if current time is between midnight and 6 am (e.g., 2 am)
+            // sleep until 6 am of the same day
+            secondsToSleep = targetSeconds - secondsPassedToday;
+        } else {
+            // if current time is after 6 am (e.g., 9 pm)
+            // sleep until 6 am of the *next* day
+            long secondsInADay = 24 * 3600L;
+            secondsToSleep = (secondsInADay - secondsPassedToday) + targetSeconds;
+        }
+
+        if (_debug_enabled) { Serial.printf("[TM] Seconds until 6 AM: %lu\n", (unsigned long)secondsToSleep); }
+        // add a small buffer (e.g., 60 seconds) to ensure it wakes up after 6 am
+        return (unsigned long)secondsToSleep + 60;
+    }
+
+
+    // returns the formatted time as a string
+    String getFormattedTime() {
+        if (!_time_synced) { return "Time not synced"; }
+        return _timeClient.getFormattedTime();
+    }
 };
