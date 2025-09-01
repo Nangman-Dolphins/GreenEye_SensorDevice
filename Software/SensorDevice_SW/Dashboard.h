@@ -234,6 +234,7 @@ public:
         PowerManager* p_power_manager,
         ActionCallback sendSensorCallback,
         ActionCallback sendAllCallback,
+        ActionCallback onDemandReadCallback,
         const char* apPassword = "defaultPW", 
         bool debug = false
     ) : _server(80),
@@ -251,6 +252,7 @@ public:
         _p_power_manager(p_power_manager), // Initialize power manager pointer
         _sendSensorCallback(sendSensorCallback), // Initialize sensor callback
         _sendAllCallback(sendAllCallback)      // Initialize all data callback
+        _onDemandReadCallback(onDemandReadCallback)
     {}
 
     void begin() {
@@ -408,6 +410,11 @@ private:
     void handleRoot() {
         if (_debug_enabled) { Serial.println("[INFO] Function called: handleRoot()"); } // log function call
         const char* content = isConnected() ? DEVICE_STATUS_CONTENT : SETUP_FORM_CONTENT; // select content based on wifi status
+
+        if (_onDemandReadCallback) {
+            _onDemandReadCallback();
+        }
+        
         _server.send(200, "text/html", buildPage(content)); // build and send the page
     }
 

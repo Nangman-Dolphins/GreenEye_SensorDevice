@@ -108,6 +108,10 @@ public:
     void initI2C() {
         Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN); // start i2c with specific pins
     }
+
+    void endI2C() {
+        Wire.end(); // releases the i2c bus and pins
+    }
     
     void initTempHumiSensor() {
         Wire.beginTransmission(AHT20_ADDR); // start transmission to aht20

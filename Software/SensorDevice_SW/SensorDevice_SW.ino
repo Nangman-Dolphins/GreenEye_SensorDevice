@@ -76,6 +76,7 @@ Dashboard dashboard(
     &powerManager,              // Pass power manager instance
     &sendSensorData,            // Pass sensor data sending function
     &sendAllData,               // Pass all data sending function
+    &performOnDemandSensorRead,
     "defaultPW",                // Access Point Password
     MAIN_DEBUG
 );
@@ -113,9 +114,15 @@ void sendSensorData() {
       DEBUG_MAIN_PRINTLN("[WARN] Not connected to WiFi, cannot send data.");
       return; // exit if not connected
   }
-  
+
   delay(250); // for stabilize
-  sensors.readAllSensors(); // Make sure sensor data is fresh before sending
+
+  if (isSetupMode) {
+    performOnDemandSensorRead();
+  }
+  if (!isSetupMode) {
+    sensors.readAllSensors();
+  }
 
   JsonDocument dataDoc; // create a json document
   dataDoc["bat_level"] = battery_level; // add battery level to json
@@ -218,6 +225,17 @@ void print_memory_status(const char* step) {
         DEBUG_MAIN_PRINTLN("No PSRAM found!");
     }
     DEBUG_MAIN_PRINTLN("--------------------------------------");
+}
+
+void performOnDemandSensorRead() {
+    // This on-demand cycle is only necessary in setup mode
+    if (isSetupMode) {
+        DEBUG_MAIN_PRINTLN("[ACTION] On-demand sensor read initiated.");
+        sensors.begin(); // Initializes I2C and sensors
+        sensors.readAllSensors(0); // Read all sensor values in normal mode
+        sensors.endI2C();  // De-initialize I2C to free up pin 2
+        DEBUG_MAIN_PRINTLN("[ACTION] On-demand sensor read complete. I2C released.");
+    }
 }
 
 void setup() {
@@ -378,7 +396,7 @@ void loop() {
                 }
               }
               delay(2000); // wait for data to be sent before sleeping
-
+              sensors.endI2C();
               // Enter deep sleep for the regular interval
               DEBUG_MAIN_PRINT("[ACTION] Entering normal deep sleep for ");
               DEBUG_MAIN_PRINT(sense_interval); DEBUG_MAIN_PRINTLN(" seconds.");

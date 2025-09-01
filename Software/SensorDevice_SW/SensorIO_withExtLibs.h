@@ -97,6 +97,10 @@ public:
         _p_ec(p_ec),
         _debug_enabled(debug)
     {}
+
+    void endI2C() {
+        Wire.end(); // releases the i2c bus and pins
+    }
     
     // pin mode setups for non-i2c sensors remain
     void initSoilMoistureSensor() {
