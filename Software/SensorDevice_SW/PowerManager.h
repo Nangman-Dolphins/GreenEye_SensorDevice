@@ -81,8 +81,7 @@ public:
         _preferences.putBool("nht_mode", enabled); // save the setting to storage
         if (_debug_enabled) { Serial.printf("[PM] Night mode set to: %s and saved.\n", enabled ? "ON" : "OFF"); }
     }
-
-    // ADDED: Function to get the current power mode as a string for display
+    
     String getModeString() {
         switch (_currentMode) {
             case ULTRA_LOW_POWER: return "초저전력";
@@ -94,6 +93,9 @@ public:
             default:              return "Unknown";
         }
     }
+
+    // ADDED: getter for the current mode enum
+    PowerMode getCurrentMode() { return _currentMode; }
 
     unsigned long getSenseInterval() { return _senseInterval; } // returns the current sensor interval
     unsigned long getCamInterval() { return _camInterval; }   // returns the current camera interval

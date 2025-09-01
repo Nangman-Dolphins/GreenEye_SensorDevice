@@ -224,7 +224,6 @@ void setup() {
   ledcSetup(LEDC_CHANNEL, LEDC_FREQ, LEDC_RESOLUTION);
   ledcAttachPin(FLASH_PIN, LEDC_CHANNEL);
   ledcWrite(LEDC_CHANNEL, 10);
-  
   if(MAIN_DEBUG){
     Serial.begin(115200); // initialize serial communication
     delay(1000); // wait for serial monitor to open
@@ -262,13 +261,13 @@ void setup() {
     ledcWrite(LEDC_CHANNEL, 0); delay(500);
     pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
     dashboard.begin(); 
-    sensors.begin(); // initialize sensors
   } else {
     DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED."); 
     ledcWrite(LEDC_CHANNEL, 0); delay(500);
     ledcWrite(LEDC_CHANNEL, 10);
     pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
     dashboard.beginWiFi(); // wifi only
+    sensors.begin(); // initialize sensors
   }
   print_memory_status("After dashboard init");
 
@@ -331,66 +330,77 @@ void loop() {
     // --- Normal Mode: Sense, Transmit, Sleep ---
     ledcWrite(LEDC_CHANNEL, 0);
 
-    // ADDED: check for night mode before normal operations
-    if (powerManager.isNightModeEnabled() && timeManager.isNightTime()) {
-        DEBUG_MAIN_PRINTLN("[INFO] Night mode is active. Entering deep sleep until 6 AM.");
-        unsigned long sleep_duration_seconds = timeManager.getSecondsUntil6AM();
-        
-        DEBUG_MAIN_PRINT("[ACTION] Entering deep sleep for ");
-        DEBUG_MAIN_PRINT(sleep_duration_seconds); DEBUG_MAIN_PRINTLN(" seconds (Night Mode).");
-        
-        // configure wakeup sources
-        Wire.end();
-        rtc_gpio_pullup_en(GPIO_NUM_2); // for setup button
-        rtc_gpio_pulldown_dis(GPIO_NUM_2);
-        delay(1000); // allow settings to apply
-        
-        esp_sleep_enable_timer_wakeup(sleep_duration_seconds * 1000000ULL); // set the wakeup timer for 6 am
-        esp_sleep_enable_ext0_wakeup(GPIO_NUM_2, 0); // enable wakeup on button press
+    // check if should enter the periodic night sleep cycle
+    if (powerManager.isNightModeEnabled() && timeManager.isNightTime() && powerManager.getCurrentMode() != DEBUGGING) {
+        DEBUG_MAIN_PRINTLN("[INFO] Night mode active. Woke up to check for MQTT updates.");
 
-        esp_deep_sleep_start(); // enter deep sleep
-        return; // code will not reach here, but good practice
-    }
+        // try to connect and check MQTT messages
+        if (WiFi.status() == WL_CONNECTED && mqtt.loop()) {
+            DEBUG_MAIN_PRINTLN("[INFO] MQTT check complete.");
+        } else {
+            DEBUG_MAIN_PRINTLN("[WARN] Could not connect to WiFi/MQTT during night check.");
+        }
 
-    // --- If not night mode, proceed with normal operation ---
-    if (WiFi.status() == WL_CONNECTED) { // if wifi connected successfully
-      DEBUG_MAIN_PRINTLN("[INFO] WiFi Connected.");
-      mqtt.loop() handles timed reconnection and returns status
-      if (mqtt.loop()) {
-          DEBUG_MAIN_PRINTLN("[INFO] MQTT broker connected.");
-          unsigned long sense_interval = powerManager.getSenseInterval();
-          unsigned long cam_interval = powerManager.getCamInterval();
-          // Always send sensor data on wakeup in normal mode
-          sendSensorData();
-          if (cam_interval > 0 && sense_interval > 0) { // prevent division by zero
-            int sense_cycles_per_cam = cam_interval / sense_interval;
-            if (bootCount % sense_cycles_per_cam == 0) {
-                sendCameraData();
-            }
+        // calculate sleep time (max 10 mins, or until 6 AM) and go back to sleep
+        unsigned long sleep_duration_seconds = min(10UL * 60, timeManager.getSecondsUntil6AM());
+        
+        if (sleep_duration_seconds > 10) { // A small threshold to prevent sleeping for a few seconds if it's already 6 AM
+            DEBUG_MAIN_PRINT("[ACTION] Entering night deep sleep for ");
+            DEBUG_MAIN_PRINT(sleep_duration_seconds); DEBUG_MAIN_PRINTLN(" seconds.");
+            
+            Wire.end();
+            rtc_gpio_pullup_en(GPIO_NUM_2);
+            rtc_gpio_pulldown_dis(GPIO_NUM_2);
+            delay(1000);
+            
+            esp_sleep_enable_timer_wakeup(sleep_duration_seconds * 1000000ULL);
+            esp_sleep_enable_ext0_wakeup(GPIO_NUM_2, 0);
+
+            esp_deep_sleep_start();
+        } else {
+            DEBUG_MAIN_PRINTLN("[INFO] Night mode period ending. Proceeding to normal operation.");
+        }
+    } 
+    // if not in the night cycle, execute normal daytime operation
+    else {
+        if (WiFi.status() == WL_CONNECTED) { // if wifi connected successfully
+          DEBUG_MAIN_PRINTLN("[INFO] WiFi Connected.");
+          if (mqtt.loop()) { // mqtt.loop() also handles incoming messages
+              DEBUG_MAIN_PRINTLN("[INFO] MQTT broker connected.");
+              unsigned long sense_interval = powerManager.getSenseInterval();
+              unsigned long cam_interval = powerManager.getCamInterval();
+              // Always send sensor data on wakeup in normal mode
+              sendSensorData();
+              if (cam_interval > 0 && sense_interval > 0) { // prevent division by zero
+                int sense_cycles_per_cam = cam_interval / sense_interval;
+                if (bootCount % sense_cycles_per_cam == 0) {
+                    sendCameraData();
+                }
+              }
+              delay(2000); // wait for data to be sent before sleeping
+
+              // Enter deep sleep for the regular interval
+              DEBUG_MAIN_PRINT("[ACTION] Entering normal deep sleep for ");
+              DEBUG_MAIN_PRINT(sense_interval); DEBUG_MAIN_PRINTLN(" seconds.");
+              Wire.end();
+              rtc_gpio_pullup_en(GPIO_NUM_2);
+              rtc_gpio_pulldown_dis(GPIO_NUM_2);
+              delay(1000);
+              esp_sleep_enable_timer_wakeup(sense_interval * 1000000ULL); // set the wakeup timer
+              esp_sleep_enable_ext0_wakeup(GPIO_NUM_2, 0); // enable wakeup on button press
+              esp_deep_sleep_start(); // enter deep sleep
+
+          } else {
+              // MQTT connection failed after retries
+              DEBUG_MAIN_PRINTLN("\n[ERROR] Failed to connect to MQTT broker, entering setup mode on next boot.");
+              preferences.putBool("setup_mode", true);
+              ESP.restart(); // Restart to switch to setup mode immediately
           }
-          delay(2000); // wait for data to be sent before sleeping
-      } else {
-          // MQTT connection failed after retries in MQTT.h
-          DEBUG_MAIN_PRINTLN("\n[ERROR] Failed to connect to MQTT broker, entering setup mode on next boot.");
+        } else {
+          DEBUG_MAIN_PRINTLN("\n[ERROR] Failed to connect to WiFi, entering setup mode on next boot.");
           preferences.putBool("setup_mode", true);
-      }
-      
-    } else {
-      DEBUG_MAIN_PRINTLN("\n[ERROR] Failed to connect to WiFi, entering setup mode on next boot.");
-      preferences.putBool("setup_mode", true);
+          ESP.restart(); // Restart to switch to setup mode immediately
+        }
     }
-
-    unsigned long sleep_duration_seconds = powerManager.getSenseInterval(); // get the sleep duration
-    DEBUG_MAIN_PRINT("[ACTION] Entering deep sleep for ");
-    DEBUG_MAIN_PRINT(sleep_duration_seconds); DEBUG_MAIN_PRINTLN(" seconds.");
-    // configure wakeup sources
-    Wire.end();
-    rtc_gpio_pullup_en(GPIO_NUM_2);
-    rtc_gpio_pulldown_dis(GPIO_NUM_2);
-    delay(1000);
-    esp_sleep_enable_timer_wakeup(sleep_duration_seconds * 1000000ULL); // set the wakeup timer
-    esp_sleep_enable_ext0_wakeup(GPIO_NUM_2, 0); // enable wakeup on button press
-
-    esp_deep_sleep_start(); // enter deep sleep
   }
 }
