@@ -222,6 +222,7 @@ private:
     PowerManager* _p_power_manager;
     ActionCallback _sendSensorCallback;
     ActionCallback _sendAllCallback;
+    ActionCallback _onDemandReadCallback;
 
 
 public:
@@ -251,7 +252,7 @@ public:
         _p_ccu_address(p_ccu_address),
         _p_power_manager(p_power_manager), // Initialize power manager pointer
         _sendSensorCallback(sendSensorCallback), // Initialize sensor callback
-        _sendAllCallback(sendAllCallback)      // Initialize all data callback
+        _sendAllCallback(sendAllCallback),      // Initialize all data callback
         _onDemandReadCallback(onDemandReadCallback)
     {}
 

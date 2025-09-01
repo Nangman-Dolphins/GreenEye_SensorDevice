@@ -2,8 +2,8 @@
 
 #include "Camera.h"       // include the camera class
 #include "Dashboard.h"    // include the dashboard class
-#include "SensorsIO.h"    // include the sensor io class
-//#include "SensorsIO_withExtLib.h"    // version for using external libs
+//#include "SensorsIO.h"    // include the sensor io class
+#include "SensorIO_withExtLibs.h"    // version for using external libs
 #include "PowerManager.h" // include the power manager class
 #include "MQTT.h"         // include the mqtt client class
 #include "TimeManager.h"  // ADDED: include the new time manager class
@@ -33,6 +33,7 @@ const int LEDC_RESOLUTION = 8; // 8bit Res
 // --- Forward declarations for callbacks ---
 void sendSensorData();
 void sendAllData();
+void performOnDemandSensorRead();
 // --- Global Variables & Objects ---
 RTC_DATA_ATTR int bootCount = 0; // a counter that survives deep sleep
 

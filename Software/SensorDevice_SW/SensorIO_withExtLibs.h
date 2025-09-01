@@ -5,7 +5,9 @@
 
 // --- include the external sensor libraries ---
 #include <Adafruit_ADS1X15.h> // for the ads1015 adc
-#include <Adafruit_AHTX0.h>   // for the aht20 temp/humi sensor
+#define sensor_t adafruit_sensor_t
+#include <Adafruit_AHTX0.h>
+#undef sensor_t // remove the temporary name change
 #include <BH1750.h>           // for the gy-302 (bh1750) light sensor
 
 #define SENSOR_READ_RETRIES 5 // macro for sensor read retry count
