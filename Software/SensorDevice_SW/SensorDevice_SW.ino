@@ -3,6 +3,7 @@
 #include "Camera.h"       // include the camera class
 #include "Dashboard.h"    // include the dashboard class
 #include "SensorsIO.h"    // include the sensor io class
+//#include "SensorsIO_withExtLib.h"    // version for using external libs
 #include "PowerManager.h" // include the power manager class
 #include "MQTT.h"         // include the mqtt client class
 #include "TimeManager.h"  // ADDED: include the new time manager class
@@ -11,7 +12,7 @@
 #include "driver/rtc_io.h"
 
 // === Main Debug Switch ===
-#define MAIN_DEBUG 0 // set to 1 to enable detailed logs from this file, 0 to disable
+#define MAIN_DEBUG 1 // set to 1 to enable detailed logs from this file, 0 to disable
 
 #if MAIN_DEBUG == 1
   #define DEBUG_MAIN_PRINT(x) Serial.print(x)
@@ -114,7 +115,7 @@ void sendSensorData() {
   }
   
   delay(250); // for stabilize
-  //sensors.readAllSensors(); // Make sure sensor data is fresh before sending
+  sensors.readAllSensors(); // Make sure sensor data is fresh before sending
 
   JsonDocument dataDoc; // create a json document
   dataDoc["bat_level"] = battery_level; // add battery level to json
@@ -354,7 +355,7 @@ void loop() {
     // --- If not night mode, proceed with normal operation ---
     if (WiFi.status() == WL_CONNECTED) { // if wifi connected successfully
       DEBUG_MAIN_PRINTLN("[INFO] WiFi Connected.");
-      // mqtt.loop() handles timed reconnection and returns status
+      mqtt.loop() handles timed reconnection and returns status
       if (mqtt.loop()) {
           DEBUG_MAIN_PRINTLN("[INFO] MQTT broker connected.");
           unsigned long sense_interval = powerManager.getSenseInterval();
