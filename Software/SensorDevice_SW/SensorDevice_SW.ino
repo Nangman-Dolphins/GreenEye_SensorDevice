@@ -115,7 +115,6 @@ void sendSensorData() {
       DEBUG_MAIN_PRINTLN("[WARN] Not connected to WiFi, cannot send data.");
       return; // exit if not connected
   }
-
   delay(250); // for stabilize
 
   if (isSetupMode) {
@@ -232,8 +231,11 @@ void performOnDemandSensorRead() {
     // This on-demand cycle is only necessary in setup mode
     if (isSetupMode) {
         DEBUG_MAIN_PRINTLN("[ACTION] On-demand sensor read initiated.");
+        delay(100);
         sensors.begin(); // Initializes I2C and sensors
+        delay(100);
         sensors.readAllSensors(0); // Read all sensor values in normal mode
+        delay(100);
         sensors.endI2C();  // De-initialize I2C to free up pin 2
         DEBUG_MAIN_PRINTLN("[ACTION] On-demand sensor read complete. I2C released.");
     }

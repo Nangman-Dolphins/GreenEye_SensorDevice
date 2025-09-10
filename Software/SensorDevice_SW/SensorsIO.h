@@ -400,15 +400,15 @@ public:
     void readAllSensors(int rawMode = 0) {
         if (_debug_enabled) { Serial.println("\n[SensorIO] --- Starting Full Sensor Read Cycle ---"); }
         readAmbientTempHumi();
-        delay(50);
+        delay(1000);
         readLight();
-        delay(50);
+        delay(1000);
         readSoilTemp(rawMode);
-        delay(50);
+        delay(1000);
         readSoilEC(rawMode);
-        delay(50);
+        delay(1000);
         readBatteryLevel(rawMode);
-        delay(50);
+        delay(1000);
         readSoilMoisture(rawMode);
         if (_debug_enabled) { Serial.println("[SensorIO] --- Sensor Read Cycle Complete ---"); }
     }
