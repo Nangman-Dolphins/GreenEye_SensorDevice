@@ -123,7 +123,7 @@ public:
             if (_debug_enabled) Serial.println("[SensorIO][ERROR] Failed to find ADS1015 chip");
             return false;
         }
-        ads.setGain(GAIN_ONE); // gain 1 for +/- 4.096v range (matches original config)
+        ads.setGain(GAIN_TWOTHIRDS); // gain 2/3 for +/- 6.144v range (matches original config)
 
         if (!aht.begin()) {
             if (_debug_enabled) Serial.println("[SensorIO][ERROR] Failed to find AHT20 chip");
@@ -173,7 +173,7 @@ public:
         if (rawMode == 1) {
             *_p_battery_level = avgAdcValue;
         } else {
-            float dividerVoltage = avgAdcValue * 0.002;
+            float dividerVoltage = avgAdcValue * 0.1875;
             float batteryVoltage = dividerVoltage * 2.0;
             float clamped_voltage = constrain(batteryVoltage, 3.0, 4.2);
             *_p_battery_level = map(clamped_voltage * 100, 300, 420, 0, 100);
