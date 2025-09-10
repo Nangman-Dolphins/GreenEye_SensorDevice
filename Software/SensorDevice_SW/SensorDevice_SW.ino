@@ -280,13 +280,11 @@ void setup() {
     ledcWrite(LEDC_CHANNEL, 0); delay(500);
     ledcWrite(LEDC_CHANNEL, 10); delay(500);
     ledcWrite(LEDC_CHANNEL, 0); delay(500);
-    pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
     dashboard.begin(); 
   } else {
     DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED."); 
     ledcWrite(LEDC_CHANNEL, 0); delay(500);
     ledcWrite(LEDC_CHANNEL, 10);
-    pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
     dashboard.beginWiFi(); // wifi only
     sensors.begin(); // initialize sensors
   }
