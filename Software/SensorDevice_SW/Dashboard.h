@@ -411,16 +411,17 @@ private:
     void handleRoot() {
         if (_debug_enabled) { Serial.println("[INFO] Function called: handleRoot()"); } // log function call
         const char* content = isConnected() ? DEVICE_STATUS_CONTENT : SETUP_FORM_CONTENT; // select content based on wifi status
-
-        if (_onDemandReadCallback) {
-            _onDemandReadCallback();
-        }
         
         _server.send(200, "text/html", buildPage(content)); // build and send the page
     }
 
     void handleDashboard() {
         if (_debug_enabled) { Serial.println("[INFO] Function called: handleDashboard()"); } // log function call
+        
+        if (_onDemandReadCallback) {
+            _onDemandReadCallback();
+        }
+        
         _server.send(200, "text/html", buildPage(DASHBOARD_CONTENT)); // build and send the page
     }
 
