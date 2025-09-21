@@ -73,7 +73,7 @@ private:
             23.9, 101.8, 167.3, 174.6, 426.5, 881.8, 1370.9, 2961.5, 5295.0
         };
 
-        // 다점 선형 보간법 (Python 코드와 동일)
+        // Multi point linear interpolation
         for (int i = 0; i < NUM_CAL_POINTS - 1; i++) {
             if (adc_value >= adc_points[i] && adc_value <= adc_points[i+1]) {
                 float x1 = adc_points[i];
@@ -265,7 +265,7 @@ public:
         long total = 0;
         int valid_readings = 0;
         for (int i = 0; i < SENSOR_AVG_COUNT; i++) {
-            int16_t adcValue = readADS1015(0);
+            int16_t adcValue = readADS1015(1);
             if (_debug_enabled) { Serial.printf("  [RAW] Reading #%d: ADC=%d\n", i + 1, adcValue); }
             if (adcValue >= 0) {
                 total += adcValue;
@@ -304,7 +304,7 @@ public:
         long total = 0;
         int valid_readings = 0;
         for (int i = 0; i < SENSOR_AVG_COUNT; i++) {
-            int16_t adcValue = readADS1015(1);
+            int16_t adcValue = readADS1015(0);
             if (adcValue >= 0) {
                 total += adcValue;
                 valid_readings++;

@@ -123,7 +123,7 @@ public:
             if (_debug_enabled) Serial.println("[SensorIO][ERROR] Failed to find ADS1015 chip");
             return false;
         }
-        ads.setGain(GAIN_TWOTHIRDS); // gain 2/3 for +/- 6.144v range (matches original config)
+        ads.setGain(GAIN_ONE); // gain 1 for +/- 4.096V range (matches original config)
 
         if (!aht.begin()) {
             if (_debug_enabled) Serial.println("[SensorIO][ERROR] Failed to find AHT20 chip");
@@ -173,7 +173,7 @@ public:
         if (rawMode == 1) {
             *_p_battery_level = avgAdcValue;
         } else {
-            float dividerVoltage = avgAdcValue * 0.1875;
+            float dividerVoltage = avgAdcValue * 0.002;
             float batteryVoltage = dividerVoltage * 2.0;
             float clamped_voltage = constrain(batteryVoltage, 3.0, 4.2);
             *_p_battery_level = map(clamped_voltage * 100, 300, 420, 0, 100);
@@ -251,6 +251,7 @@ public:
         }
     }
 
+
     void readSoilTemp(int rawMode) {
         if (!_p_temp_soil) return;
         if (_debug_enabled) Serial.printf("[SensorIO] Reading Soil Temperature (rawMode=%d)...\n", rawMode);
@@ -258,7 +259,7 @@ public:
         int valid_readings = 0;
         for (int i = 0; i < SENSOR_AVG_COUNT; i++) {
             // using library to read adc channel 0
-            int16_t adcValue = readADS1015(0);
+            int16_t adcValue = readADS1015(1);
             if (_debug_enabled) { Serial.printf("  [RAW] Reading #%d: ADC=%d\n", i + 1, adcValue); }
             if (adcValue >= 0) {
                 total += adcValue;
@@ -299,7 +300,7 @@ public:
         int valid_readings = 0;
         for (int i = 0; i < SENSOR_AVG_COUNT; i++) {
             // using library to read adc channel 1
-            int16_t adcValue = readADS1015(1);
+            int16_t adcValue = readADS1015(0);
             if (adcValue >= 0) {
                 total += adcValue;
                 valid_readings++;
