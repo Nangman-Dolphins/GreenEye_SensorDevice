@@ -1,5 +1,3 @@
-// SensorDevice_SW.ino
-
 #include "Camera.h"       // include the camera class
 #include "Dashboard.h"    // include the dashboard class
 //#include "SensorsIO.h"    // include the sensor io class
@@ -10,6 +8,7 @@
 #include <Preferences.h>  // include for using the setup mode flag
 #include "mbedtls/base64.h" // include for base64 incoding
 #include "driver/rtc_io.h"
+#include <ArduinoJson.h>  // modified: explicitly include for staticjson
 
 // === Main Debug Switch ===
 #define MAIN_DEBUG 1 // set to 1 to enable detailed logs from this file, 0 to disable
@@ -46,9 +45,9 @@ float soil_moisture    = 60.0; // holds soil moisture
 float soil_ec          = 7.0; // holds soil electrical conductivity
 String ccu_address     = "";   // holds the ccu address
 
-TimeManager timeManager(MAIN_DEBUG);   // ADDED: create the time manager object
+TimeManager timeManager(MAIN_DEBUG); // ADDED: create the time manager object
 PowerManager powerManager(MAIN_DEBUG); // create the power manager object
-Camera camera;                 // create the camera object
+Camera camera; // create the camera object
 SensorIO sensors(              // create the sensor io class
     &battery_level,
     &ambient_temp,
@@ -91,7 +90,7 @@ const unsigned long SETUP_MODE_TIMEOUT = 10 * 60 * 1000; // 10 minutes timeout f
 void handleWakeupReason(){
   esp_sleep_wakeup_cause_t wakeup_reason;
   wakeup_reason = esp_sleep_get_wakeup_cause();
-  switch(wakeup_reason)
+switch(wakeup_reason)
   {
     case ESP_SLEEP_WAKEUP_EXT0 : // in case of waking up from button press
       DEBUG_MAIN_PRINTLN("[INFO] Wakeup caused by external signal using RTC_IO");
@@ -124,6 +123,7 @@ void sendSensorData() {
     sensors.readAllSensors();
   }
 
+  // modified: use static json document for memory safety
   JsonDocument dataDoc; // create a json document
   dataDoc["bat_level"] = battery_level; // add battery level to json
   dataDoc["amb_temp"] = ambient_temp; // add ambient temperature to json
@@ -171,7 +171,8 @@ void sendCameraData() {
         }
         base64_buf[output_len] = '\0'; // ensure null termination
 
-        JsonDocument dataDoc;
+        // modified: use static json document for memory safety
+        JsonDocument dataDoc; // create a json doc
         dataDoc["plant_img"] = (char*)base64_buf;
         
         String output;
@@ -236,7 +237,7 @@ void performOnDemandSensorRead() {
         delay(100);
         sensors.readAllSensors(0); // Read all sensor values in normal mode
         delay(100);
-        sensors.endI2C();  // De-initialize I2C to free up pin 2
+        sensors.endI2C(); // De-initialize I2C to free up pin 2
         DEBUG_MAIN_PRINTLN("[ACTION] On-demand sensor read complete. I2C released.");
     }
 }
@@ -280,7 +281,7 @@ void setup() {
     ledcWrite(LEDC_CHANNEL, 0); delay(500);
     ledcWrite(LEDC_CHANNEL, 10); delay(500);
     ledcWrite(LEDC_CHANNEL, 0); delay(500);
-    dashboard.begin(); 
+    dashboard.begin();
   } else {
     DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED."); 
     ledcWrite(LEDC_CHANNEL, 0); delay(500);
@@ -308,7 +309,7 @@ void setup() {
       mqtt.onConfig(handleConfig); // register the config callback
       mqtt.begin(); // initialize mqtt client
       
-      // ADDED: initialize time manager and sync time
+      //initialize time manager and sync time
       timeManager.begin();
       timeManager.updateTime();
       
@@ -348,11 +349,9 @@ void loop() {
   } else {
     // --- Normal Mode: Sense, Transmit, Sleep ---
     ledcWrite(LEDC_CHANNEL, 0);
-
     // check if should enter the periodic night sleep cycle
     if (powerManager.isNightModeEnabled() && timeManager.isNightTime() && powerManager.getCurrentMode() != DEBUGGING) {
         DEBUG_MAIN_PRINTLN("[INFO] Night mode active. Woke up to check for MQTT updates.");
-
         // try to connect and check MQTT messages
         if (WiFi.status() == WL_CONNECTED && mqtt.loop()) {
             DEBUG_MAIN_PRINTLN("[INFO] MQTT check complete.");
@@ -362,20 +361,9 @@ void loop() {
 
         // calculate sleep time (max 10 mins, or until 6 AM) and go back to sleep
         unsigned long sleep_duration_seconds = min(10UL * 60, timeManager.getSecondsUntil6AM());
-        
         if (sleep_duration_seconds > 10) { // A small threshold to prevent sleeping for a few seconds if it's already 6 AM
-            DEBUG_MAIN_PRINT("[ACTION] Entering night deep sleep for ");
-            DEBUG_MAIN_PRINT(sleep_duration_seconds); DEBUG_MAIN_PRINTLN(" seconds.");
-            
-            Wire.end();
-            rtc_gpio_pullup_en(GPIO_NUM_2);
-            rtc_gpio_pulldown_dis(GPIO_NUM_2);
-            delay(1000);
-            
-            esp_sleep_enable_timer_wakeup(sleep_duration_seconds * 1000000ULL);
-            esp_sleep_enable_ext0_wakeup(GPIO_NUM_2, 0);
-
-            esp_deep_sleep_start();
+            // modified: use the encapsulated deep sleep function
+            powerManager.enterDeepSleep(sleep_duration_seconds);
         } else {
             DEBUG_MAIN_PRINTLN("[INFO] Night mode period ending. Proceeding to normal operation.");
         }
@@ -386,28 +374,20 @@ void loop() {
           DEBUG_MAIN_PRINTLN("[INFO] WiFi Connected.");
           if (mqtt.loop()) { // mqtt.loop() also handles incoming messages
               DEBUG_MAIN_PRINTLN("[INFO] MQTT broker connected.");
-              unsigned long sense_interval = powerManager.getSenseInterval();
-              unsigned long cam_interval = powerManager.getCamInterval();
+
               // Always send sensor data on wakeup in normal mode
               sendSensorData();
-              if (cam_interval > 0 && sense_interval > 0) { // prevent division by zero
-                int sense_cycles_per_cam = cam_interval / sense_interval;
-                if (bootCount % sense_cycles_per_cam == 0) {
-                    sendCameraData();
-                }
+              
+              // modified: use the encapsulated camera check function
+              if (powerManager.shouldSendCameraData(bootCount)) {
+                  sendCameraData();
               }
+              
               delay(2000); // wait for data to be sent before sleeping
               sensors.endI2C();
-              // Enter deep sleep for the regular interval
-              DEBUG_MAIN_PRINT("[ACTION] Entering normal deep sleep for ");
-              DEBUG_MAIN_PRINT(sense_interval); DEBUG_MAIN_PRINTLN(" seconds.");
-              Wire.end();
-              rtc_gpio_pullup_en(GPIO_NUM_2);
-              rtc_gpio_pulldown_dis(GPIO_NUM_2);
-              delay(1000);
-              esp_sleep_enable_timer_wakeup(sense_interval * 1000000ULL); // set the wakeup timer
-              esp_sleep_enable_ext0_wakeup(GPIO_NUM_2, 0); // enable wakeup on button press
-              esp_deep_sleep_start(); // enter deep sleep
+              
+              // modified: use the encapsulated deep sleep function
+              powerManager.enterDeepSleep(powerManager.getSenseInterval());
 
           } else {
               // MQTT connection failed after retries

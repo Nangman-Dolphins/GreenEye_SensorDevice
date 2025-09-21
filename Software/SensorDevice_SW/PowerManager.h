@@ -3,6 +3,9 @@
 #pragma once // prevents multiple inclusion of the header file
 
 #include <Preferences.h> // for non-volatile storage
+#include "driver/rtc_io.h"  // added: include for rtc gpio functions
+#include <Arduino.h>        // added: include for serial and esp functions
+#include <Wire.h>           // added: include for i2c control
 
 enum PowerMode { // defines the available power modes
     ULTRA_LOW_POWER, // z
@@ -84,12 +87,12 @@ public:
     
     String getModeString() {
         switch (_currentMode) {
-            case ULTRA_LOW_POWER: return "초저전력";
-            case LOW_POWER:       return "저전력";
-            case NORMAL:          return "일반";
-            case HIGH_FREQ:       return "고빈도";
-            case ULTRA_HIGH_FREQ: return "초고빈도";
-            case DEBUGGING:       return "디버그 모드";
+            case ULTRA_LOW_POWER: return "Ultra Low Power";
+            case LOW_POWER:       return "Low Power";
+            case NORMAL:          return "Normal";
+            case HIGH_FREQ:       return "High Freq";
+            case ULTRA_HIGH_FREQ: return "Ultra High Freq";
+            case DEBUGGING:       return "Debug Mode";
             default:              return "Unknown";
         }
     }
@@ -100,4 +103,43 @@ public:
     unsigned long getSenseInterval() { return _senseInterval; } // returns the current sensor interval
     unsigned long getCamInterval() { return _camInterval; }   // returns the current camera interval
     bool isNightModeEnabled() { return _nightModeEnabled; }    // returns if night mode is enabled
+
+    // added: a method to check if camera data should be sent
+    bool shouldSendCameraData(int currentBootCount) {
+        // check to prevent division by zero
+        if (_camInterval > 0 && _senseInterval > 0) {
+            int sense_cycles_per_cam = _camInterval / _senseInterval;
+            // ensure it makes sense to check the modulo
+            if (sense_cycles_per_cam > 0) {
+                 return (currentBootCount % sense_cycles_per_cam == 0);
+            }
+        }
+        // return false if intervals are not set correctly
+        return false;
+    }
+
+    // added: a method to handle deep sleep logic
+    void enterDeepSleep(unsigned long sleep_seconds) {
+        if (_debug_enabled) {
+            Serial.print("[PM] Entering deep sleep for ");
+            Serial.print(sleep_seconds);
+            Serial.println(" seconds.");
+        }
+        
+        // moved the deep sleep hardware control logic here
+        Wire.end(); // disable i2c bus before sleep
+        
+        // setup wakeup pin
+        rtc_gpio_pullup_en(GPIO_NUM_2);
+        rtc_gpio_pulldown_dis(GPIO_NUM_2);
+        
+        delay(100); // short delay for stability
+
+        // enable wakeup sources
+        esp_sleep_enable_timer_wakeup(sleep_seconds * 1000000ULL);
+        esp_sleep_enable_ext0_wakeup(GPIO_NUM_2, 0); // wakeup on low level
+
+        // start deep sleep
+        esp_deep_sleep_start();
+    }
 };
