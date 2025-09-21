@@ -1,14 +1,16 @@
-#include "Camera.h"       // include the camera class
-#include "Dashboard.h"    // include the dashboard class
-//#include "SensorsIO.h"    // include the sensor io class
-#include "SensorIO_withExtLibs.h"    // version for using external libs
-#include "PowerManager.h" // include the power manager class
-#include "MQTT.h"         // include the mqtt client class
-#include "TimeManager.h"  // ADDED: include the new time manager class
-#include <Preferences.h>  // include for using the setup mode flag
-#include "mbedtls/base64.h" // include for base64 incoding
+#include "Camera.h"
+#include "Dashboard.h"
+#include "SensorIO_withExtLibs.h"
+#include "PowerManager.h"
+#include "MQTT.h"
+#include "TimeManager.h"
+#include <Preferences.h>
+#include "mbedtls/base64.h"
 #include "driver/rtc_io.h"
-#include <ArduinoJson.h>  // modified: explicitly include for staticjson
+#include <ArduinoJson.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
 
 // === Main Debug Switch ===
 #define MAIN_DEBUG 1 // set to 1 to enable detailed logs from this file, 0 to disable
@@ -29,10 +31,21 @@ const int LEDC_CHANNEL = 1; // LEDC Channel
 const int LEDC_FREQ = 5000;   // PWM Freq
 const int LEDC_RESOLUTION = 8; // 8bit Res
 
-// --- Forward declarations for callbacks ---
+// --- rtos handles and queue ---
+TaskHandle_t webServerTaskHandle = NULL;
+TaskHandle_t backgroundTaskHandle = NULL;
+QueueHandle_t commandQueue;
+
+// --- command enum for rtos queue ---
+enum Command { CMD_SEND_SENSORS, CMD_SEND_ALL };
+
+// --- Forward declarations for callbacks and tasks ---
 void sendSensorData();
 void sendAllData();
 void performOnDemandSensorRead();
+void webServerTask(void *parameter);
+void backgroundTask(void *parameter);
+
 // --- Global Variables & Objects ---
 RTC_DATA_ATTR int bootCount = 0; // a counter that survives deep sleep
 
@@ -45,7 +58,7 @@ float soil_moisture    = 60.0; // holds soil moisture
 float soil_ec          = 7.0; // holds soil electrical conductivity
 String ccu_address     = "";   // holds the ccu address
 
-TimeManager timeManager(MAIN_DEBUG); // ADDED: create the time manager object
+TimeManager timeManager(MAIN_DEBUG); // create the time manager object
 PowerManager powerManager(MAIN_DEBUG); // create the power manager object
 Camera camera; // create the camera object
 SensorIO sensors(              // create the sensor io class
@@ -90,7 +103,7 @@ const unsigned long SETUP_MODE_TIMEOUT = 10 * 60 * 1000; // 10 minutes timeout f
 void handleWakeupReason(){
   esp_sleep_wakeup_cause_t wakeup_reason;
   wakeup_reason = esp_sleep_get_wakeup_cause();
-switch(wakeup_reason)
+  switch(wakeup_reason)
   {
     case ESP_SLEEP_WAKEUP_EXT0 : // in case of waking up from button press
       DEBUG_MAIN_PRINTLN("[INFO] Wakeup caused by external signal using RTC_IO");
@@ -107,36 +120,33 @@ switch(wakeup_reason)
   }
 }
 
-// --- MQTT Event Handler Functions ---
-
+// --- Action Functions (called by dashboard or MQTT) ---
 void sendSensorData() {
-  if (!dashboard.isConnected()) { // check if connected to wifi
-      DEBUG_MAIN_PRINTLN("[WARN] Not connected to WiFi, cannot send data.");
-      return; // exit if not connected
-  }
-  delay(250); // for stabilize
-
-  if (isSetupMode) {
-    performOnDemandSensorRead();
-  }
-  if (!isSetupMode) {
-    sensors.readAllSensors();
-  }
-
-  // modified: use static json document for memory safety
-  JsonDocument dataDoc; // create a json document
-  dataDoc["bat_level"] = battery_level; // add battery level to json
-  dataDoc["amb_temp"] = ambient_temp; // add ambient temperature to json
-  dataDoc["amb_humi"] = ambient_humidity; // add ambient humidity to json
-  dataDoc["amb_light"] = light_intensity; // add light intensity to json
-  dataDoc["soil_temp"] = soil_temp; // add soil temperature to json
-  dataDoc["soil_humi"] = soil_moisture; // add soil moisture to json
-  dataDoc["soil_ec"] = soil_ec; // add soil ec to json
-  String output; // create a string to hold the json
-  serializeJson(dataDoc, output); // convert json to string
-  print_memory_status("Sensor data JSON creation");
-  mqtt.loop();
-  mqtt.publishData(output); // publish the data
+    // in setup mode, send command to the background task queue
+    if (isSetupMode) {
+        Command cmd = CMD_SEND_SENSORS;
+        xQueueSend(commandQueue, &cmd, portMAX_DELAY);
+    } else {
+        // in normal mode, execute directly
+        if (!dashboard.isConnected()) {
+            DEBUG_MAIN_PRINTLN("[WARN] Not connected to WiFi, cannot send data.");
+            return;
+        }
+        delay(250); // for stabilize
+        sensors.readAllSensors(0);
+        JsonDocument dataDoc;
+        dataDoc["bat_level"] = battery_level;
+        dataDoc["amb_temp"] = ambient_temp;
+        dataDoc["amb_humi"] = ambient_humidity;
+        dataDoc["amb_light"] = light_intensity;
+        dataDoc["soil_temp"] = soil_temp;
+        dataDoc["soil_humi"] = soil_moisture;
+        dataDoc["soil_ec"] = soil_ec;
+        String output;
+        serializeJson(dataDoc, output);
+        mqtt.loop();
+        mqtt.publishData(output);
+    }
 }
 
 void sendCameraData() {
@@ -144,16 +154,13 @@ void sendCameraData() {
 
     delay(250); // for stabilize
 
-    print_memory_status("Before capture frame");
     DEBUG_MAIN_PRINTLN("[ACTION] Capturing high quality frame to send...");
     camera_fb_t* fb = camera.captureFrameForAnalyze(); // capture a high quality frame
 
     if (fb) { // if frame capture was successful
         DEBUG_MAIN_PRINTLN("[DEBUG] Frame captured successfully.");
-        print_memory_status("After capture frame");
-
-        size_t output_len; 
-        // calculate the required buffer size
+        size_t output_len;
+        // calculate the required buffer size for base64
         mbedtls_base64_encode(NULL, 0, &output_len, fb->buf, fb->len);
         unsigned char *base64_buf = (unsigned char *)malloc(output_len + 1); // +1 for null terminator
         if (base64_buf == NULL) {
@@ -161,7 +168,6 @@ void sendCameraData() {
             camera.releaseFrameForAnalyze(fb);
             return;
         }
-
         // perform the actual encoding
         if(mbedtls_base64_encode(base64_buf, output_len + 1, &output_len, fb->buf, fb->len) != 0) {
             DEBUG_MAIN_PRINTLN("[ERROR] Base64 encoding failed!");
@@ -171,15 +177,12 @@ void sendCameraData() {
         }
         base64_buf[output_len] = '\0'; // ensure null termination
 
-        // modified: use static json document for memory safety
-        JsonDocument dataDoc; // create a json doc
+        JsonDocument dataDoc;
         dataDoc["plant_img"] = (char*)base64_buf;
-        
         String output;
         serializeJson(dataDoc, output);
         mqtt.loop();
         mqtt.publishData(output); // publish the data
-        
         free(base64_buf);
     } else {
         DEBUG_MAIN_PRINTLN("[ERROR] Failed to capture high quality frame for sending.");
@@ -187,11 +190,17 @@ void sendCameraData() {
     camera.releaseFrameForAnalyze(fb); // release the frame buffer
 }
 
-// wrapper function to send both sensor and camera data
 void sendAllData() {
-    sendSensorData();
-    delay(100); // Small delay between sends
-    sendCameraData();
+    // in setup mode, send command to the background task
+    if (isSetupMode) {
+        Command cmd = CMD_SEND_ALL;
+        xQueueSend(commandQueue, &cmd, portMAX_DELAY);
+    } else {
+        // in normal mode, execute directly
+        sendSensorData();
+        delay(100); // Small delay between sends
+        sendCameraData();
+    }
 }
 
 void handleDataRequest() {
@@ -229,123 +238,193 @@ void print_memory_status(const char* step) {
 }
 
 void performOnDemandSensorRead() {
-    // This on-demand cycle is only necessary in setup mode
-    if (isSetupMode) {
-        DEBUG_MAIN_PRINTLN("[ACTION] On-demand sensor read initiated.");
-        delay(100);
-        sensors.begin(); // Initializes I2C and sensors
-        delay(100);
-        sensors.readAllSensors(0); // Read all sensor values in normal mode
-        delay(100);
-        sensors.endI2C(); // De-initialize I2C to free up pin 2
-        DEBUG_MAIN_PRINTLN("[ACTION] On-demand sensor read complete. I2C released.");
+    // this function is called by the background task in setup mode
+    DEBUG_MAIN_PRINTLN("[ACTION] On-demand sensor read initiated.");
+    delay(100);
+    sensors.begin(); // Initializes I2C and sensors
+    delay(100);
+    sensors.readAllSensors(0); // Read all sensor values in normal mode
+    delay(100);
+    sensors.endI2C(); // De-initialize I2C to free up pin 2
+    DEBUG_MAIN_PRINTLN("[ACTION] On-demand sensor read complete. I2C released.");
+}
+
+// --- RTOS Task Functions ---
+void webServerTask(void *parameter) {
+    DEBUG_MAIN_PRINTLN("WebServer Task started on core 1.");
+    for (;;) {
+        dashboard.loop(); // handle web server requests continuously
+        vTaskDelay(pdMS_TO_TICKS(10)); // yield to other tasks
+    }
+}
+
+void backgroundTask(void *parameter) {
+    DEBUG_MAIN_PRINTLN("Background Task started on core 0.");
+    Command receivedCmd;
+    static unsigned long buttonPressStartTime = 0;
+    
+    for (;;) {
+        // handle incoming mqtt messages
+        mqtt.loop();
+
+        // handle commands from the queue (e.g., from web dashboard)
+        if (xQueueReceive(commandQueue, &receivedCmd, 0) == pdPASS) {
+            if (receivedCmd == CMD_SEND_SENSORS) {
+                DEBUG_MAIN_PRINTLN("[RTOS] CMD_SEND_SENSORS received.");
+                performOnDemandSensorRead();
+                // re-create json data for mqtt publishing
+                JsonDocument dataDoc;
+                dataDoc["bat_level"] = battery_level;
+                dataDoc["amb_temp"] = ambient_temp;
+                dataDoc["amb_humi"] = ambient_humidity;
+                dataDoc["amb_light"] = light_intensity;
+                dataDoc["soil_temp"] = soil_temp;
+                dataDoc["soil_humi"] = soil_moisture;
+                dataDoc["soil_ec"] = soil_ec;
+                String output;
+                serializeJson(dataDoc, output);
+                mqtt.publishData(output);
+            } else if (receivedCmd == CMD_SEND_ALL) {
+                 DEBUG_MAIN_PRINTLN("[RTOS] CMD_SEND_ALL received.");
+                 performOnDemandSensorRead();
+                 // call the original functions to send data
+                 sendSensorData();
+                 delay(100);
+                 sendCameraData();
+            }
+        }
+
+        // handle button press to exit setup mode
+        if (digitalRead(SETUP_BUTTON_PIN) == LOW) {
+            if (buttonPressStartTime == 0) {
+                buttonPressStartTime = millis();
+            } else if (millis() - buttonPressStartTime > 3000) {
+                DEBUG_MAIN_PRINTLN("[ACTION] Exiting Setup mode via button press. Restarting...");
+                preferences.putBool("setup_mode", false);
+                ESP.restart();
+            }
+        } else {
+            buttonPressStartTime = 0;
+        }
+
+        // handle setup mode timeout
+        if (millis() > SETUP_MODE_TIMEOUT) {
+            DEBUG_MAIN_PRINTLN("[WARN] Setup mode timed out. Restarting...");
+            preferences.putBool("setup_mode", false);
+            ESP.restart();
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(20)); // main background loop delay
     }
 }
 
 void setup() {
-  ledcSetup(LEDC_CHANNEL, LEDC_FREQ, LEDC_RESOLUTION);
-  ledcAttachPin(FLASH_PIN, LEDC_CHANNEL);
-  ledcWrite(LEDC_CHANNEL, 10);
-  if(MAIN_DEBUG){
-    Serial.begin(115200); // initialize serial communication
-    delay(1000); // wait for serial monitor to open
-  }
-
-  if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
-  print_memory_status("After camera init");
-
-  DEBUG_MAIN_PRINTLN("[INFO] Waiting 2 seconds for IO4 pin to stabilize...");
-  delay(2000);
-  bootCount++; // increment the deep sleep wake-up counter
-  DEBUG_MAIN_PRINT("[INFO] === Boot count: ");
-  DEBUG_MAIN_PRINT(bootCount); DEBUG_MAIN_PRINTLN(" ===");
-
-  preferences.begin("device-state", false); // initialize preferences for the mode flag
-  powerManager.begin();
- 
-  handleWakeupReason(); // check why the device woke up
-
-  bool enter_setup_flag = preferences.getBool("setup_mode", false); // check if the flag is set
-
-  if (enter_setup_flag) { // if the flag was set before rebooting
-    DEBUG_MAIN_PRINTLN("[DEBUG] SETUP MODE FLAG is HIGH.");
-    isSetupMode = true; // enter setup mode
-    //preferences.putBool("setup_mode", false); // clear the flag for the next boot
-  }
-
-  // initialize subsystems based on the selected mode
-  if (isSetupMode) {
-    DEBUG_MAIN_PRINTLN("[MODE] SETUP MODE ACTIVATED.");
-    ledcWrite(LEDC_CHANNEL, 0); delay(500);
-    ledcWrite(LEDC_CHANNEL, 10); delay(500);
-    ledcWrite(LEDC_CHANNEL, 0); delay(500);
-    ledcWrite(LEDC_CHANNEL, 10); delay(500);
-    ledcWrite(LEDC_CHANNEL, 0); delay(500);
-    dashboard.begin();
-  } else {
-    DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED."); 
-    ledcWrite(LEDC_CHANNEL, 0); delay(500);
+    ledcSetup(LEDC_CHANNEL, LEDC_FREQ, LEDC_RESOLUTION);
+    ledcAttachPin(FLASH_PIN, LEDC_CHANNEL);
     ledcWrite(LEDC_CHANNEL, 10);
-    dashboard.beginWiFi(); // wifi only
-    sensors.begin(); // initialize sensors
-  }
-  print_memory_status("After dashboard init");
+    if(MAIN_DEBUG){
+        Serial.begin(115200); // initialize serial communication
+        delay(1000); // wait for serial monitor to open
+    }
 
-  DEBUG_MAIN_PRINT("[ACTION] Connecting to WiFi");
-  int connection_timeout = 30; // wait for ~15 seconds
-  while (WiFi.status() != WL_CONNECTED && connection_timeout > 0) {
-      delay(500);
-      DEBUG_MAIN_PRINT(".");
-      connection_timeout--;
-  }
-  DEBUG_MAIN_PRINTLN("Complete!");
+    if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
+    print_memory_status("After camera init");
 
-  print_memory_status("After sensors init");
+    delay(2000); // wait for io pins to stabilize
+    bootCount++; // increment the deep sleep wake-up counter
+    DEBUG_MAIN_PRINT("[INFO] === Boot count: ");
+    DEBUG_MAIN_PRINT(bootCount); DEBUG_MAIN_PRINTLN(" ===");
 
-  // Initialize MQTT and TimeManager only if WiFi is connected
-  if (WiFi.status() == WL_CONNECTED) {
-      DEBUG_MAIN_PRINTLN("\n[INFO] MQTT Initialize.");
-      mqtt.onDataRequest(handleDataRequest); // register the data request callback
-      mqtt.onConfig(handleConfig); // register the config callback
-      mqtt.begin(); // initialize mqtt client
-      
-      //initialize time manager and sync time
-      timeManager.begin();
-      timeManager.updateTime();
-      
-  } else {
-      DEBUG_MAIN_PRINTLN("\n[WARN] WiFi connection failed in setup.");
-  }
-  print_memory_status("After WiFi init");
+    preferences.begin("device-state", false); // initialize preferences for the mode flag
+    powerManager.begin();
+    
+    handleWakeupReason(); // check why the device woke up
+
+    bool enter_setup_flag = preferences.getBool("setup_mode", false); // check if the flag is set
+    if (enter_setup_flag) {
+        DEBUG_MAIN_PRINTLN("[DEBUG] SETUP MODE FLAG is HIGH.");
+        isSetupMode = true; // enter setup mode
+    }
+
+    // initialize subsystems based on the selected mode
+    if (isSetupMode) {
+        DEBUG_MAIN_PRINTLN("[MODE] SETUP MODE ACTIVATED.");
+        ledcWrite(LEDC_CHANNEL, 0); delay(500);
+        ledcWrite(LEDC_CHANNEL, 10); delay(500);
+        ledcWrite(LEDC_CHANNEL, 0); delay(500);
+        ledcWrite(LEDC_CHANNEL, 10); delay(500);
+        ledcWrite(LEDC_CHANNEL, 0); delay(500);
+        dashboard.begin();
+    } else {
+        DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED."); 
+        ledcWrite(LEDC_CHANNEL, 0); delay(500);
+        ledcWrite(LEDC_CHANNEL, 10);
+        dashboard.beginWiFi(); // wifi only
+        sensors.begin(); // initialize sensors
+    }
+
+    performOnDemandSensorRead(); // init sensing
+
+    DEBUG_MAIN_PRINT("[ACTION] Connecting to WiFi");
+    int connection_timeout = 30; // wait for ~15 seconds
+    while (WiFi.status() != WL_CONNECTED && connection_timeout > 0) {
+        delay(500);
+        DEBUG_MAIN_PRINT(".");
+        connection_timeout--;
+    }
+    DEBUG_MAIN_PRINTLN("Complete!");
+
+    // Initialize MQTT and TimeManager only if WiFi is connected
+    if (WiFi.status() == WL_CONNECTED) {
+        DEBUG_MAIN_PRINTLN("\n[INFO] MQTT Initialize.");
+        mqtt.onDataRequest(handleDataRequest); // register the data request callback
+        mqtt.onConfig(handleConfig); // register the config callback
+        mqtt.begin(); // initialize mqtt client
+        
+        // initialize time manager and sync time
+        timeManager.begin();
+        timeManager.updateTime();
+    } else {
+        DEBUG_MAIN_PRINTLN("\n[WARN] WiFi connection failed in setup.");
+        if (!isSetupMode) {
+             DEBUG_MAIN_PRINTLN("[ACTION] No WiFi in Normal Mode, entering setup mode on next boot.");
+             preferences.putBool("setup_mode", true);
+             ESP.restart();
+        }
+    }
+    print_memory_status("After WiFi init");
+
+    if(isSetupMode) {
+        // create a queue for commands between tasks
+        commandQueue = xQueueCreate(5, sizeof(Command));
+
+        // create rtos tasks for setup mode
+        // pin web server to core 1, background to core 0
+        xTaskCreatePinnedToCore(
+            webServerTask,
+            "WebServer Task",
+            4096, // stack size
+            NULL,
+            1,    // priority
+            &webServerTaskHandle,
+            1
+        );
+        xTaskCreatePinnedToCore(
+            backgroundTask,
+            "Background Task",
+            4096, // stack size
+            NULL,
+            1,    // priority
+            &backgroundTaskHandle,
+            0
+        );
+    }
 }
 
 void loop() {
-  
   if (isSetupMode) {
-    // --- Setup Mode Loop ---
-    dashboard.loop(); // continuously handle web server requests
-    mqtt.loop();
-    // check for a long button press to exit setup mode
-    static unsigned long buttonPressStartTime = 0;
-    if (digitalRead(SETUP_BUTTON_PIN) == LOW) {
-      DEBUG_MAIN_PRINTLN("[DEBUG] button press detected!");
-      if (buttonPressStartTime == 0) { 
-        buttonPressStartTime = millis();
-      } else if (millis() - buttonPressStartTime > 3000) {
-        DEBUG_MAIN_PRINTLN("[ACTION] Exiting Setup mode via button press. Restarting...");
-        preferences.putBool("setup_mode", false);
-        ESP.restart();
-      }
-    } else {
-      buttonPressStartTime = 0;
-    }
-
-    if (millis() > SETUP_MODE_TIMEOUT) { // check for the 10-minute timeout
-      DEBUG_MAIN_PRINTLN("[WARN] Setup mode timed out. Restarting...");
-      preferences.putBool("setup_mode", false); // clear the flag for the next boot
-      ESP.restart(); // reboot into normal mode
-    }
-    
+    // the loop is empty in setup mode because rtos tasks are running
+    vTaskDelay(pdMS_TO_TICKS(1000));
   } else {
     // --- Normal Mode: Sense, Transmit, Sleep ---
     ledcWrite(LEDC_CHANNEL, 0);
@@ -358,11 +437,9 @@ void loop() {
         } else {
             DEBUG_MAIN_PRINTLN("[WARN] Could not connect to WiFi/MQTT during night check.");
         }
-
         // calculate sleep time (max 10 mins, or until 6 AM) and go back to sleep
         unsigned long sleep_duration_seconds = min(10UL * 60, timeManager.getSecondsUntil6AM());
-        if (sleep_duration_seconds > 10) { // A small threshold to prevent sleeping for a few seconds if it's already 6 AM
-            // modified: use the encapsulated deep sleep function
+        if (sleep_duration_seconds > 10) { // a small threshold to prevent sleeping for a few seconds if it's already 6 AM
             powerManager.enterDeepSleep(sleep_duration_seconds);
         } else {
             DEBUG_MAIN_PRINTLN("[INFO] Night mode period ending. Proceeding to normal operation.");
@@ -374,21 +451,17 @@ void loop() {
           DEBUG_MAIN_PRINTLN("[INFO] WiFi Connected.");
           if (mqtt.loop()) { // mqtt.loop() also handles incoming messages
               DEBUG_MAIN_PRINTLN("[INFO] MQTT broker connected.");
-
-              // Always send sensor data on wakeup in normal mode
+              // always send sensor data on wakeup in normal mode
               sendSensorData();
-              
-              // modified: use the encapsulated camera check function
+              // check if it's time to send camera data
               if (powerManager.shouldSendCameraData(bootCount)) {
                   sendCameraData();
               }
               
               delay(2000); // wait for data to be sent before sleeping
               sensors.endI2C();
-              
-              // modified: use the encapsulated deep sleep function
+              // enter deep sleep for the configured interval
               powerManager.enterDeepSleep(powerManager.getSenseInterval());
-
           } else {
               // MQTT connection failed after retries
               DEBUG_MAIN_PRINTLN("\n[ERROR] Failed to connect to MQTT broker, entering setup mode on next boot.");
