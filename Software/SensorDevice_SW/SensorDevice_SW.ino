@@ -1,5 +1,4 @@
 #include "Camera.h"
-#include "Dashboard.h"
 #include "SensorIO_withExtLibs.h"
 #include "PowerManager.h"
 #include "MQTT.h"
@@ -11,6 +10,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include <WiFi.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include "Webpages.h"
+#include "NetworkManager.h"
 
 // === Main Debug Switch ===
 #define MAIN_DEBUG 1 // set to 1 to enable detailed logs from this file, 0 to disable
@@ -32,7 +36,7 @@ const int LEDC_FREQ = 5000;   // PWM Freq
 const int LEDC_RESOLUTION = 8; // 8bit Res
 
 // --- rtos handles and queue ---
-TaskHandle_t webServerTaskHandle = NULL;
+TaskHandle_t cameraTaskHandle = NULL;
 TaskHandle_t backgroundTaskHandle = NULL;
 QueueHandle_t commandQueue;
 
@@ -43,12 +47,10 @@ enum Command { CMD_SEND_SENSORS, CMD_SEND_ALL };
 void sendSensorData();
 void sendAllData();
 void performOnDemandSensorRead();
-void webServerTask(void *parameter);
 void backgroundTask(void *parameter);
 
 // --- Global Variables & Objects ---
 RTC_DATA_ATTR int bootCount = 0; // a counter that survives deep sleep
-
 int   battery_level    = 1; // holds the battery level percentage
 float ambient_temp     = 2.0;  // holds ambient temperature
 float ambient_humidity = 3.0; // holds ambient humidity
@@ -58,42 +60,18 @@ float soil_moisture    = 60.0; // holds soil moisture
 float soil_ec          = 7.0; // holds soil electrical conductivity
 String ccu_address     = "";   // holds the ccu address
 
+// create async server and websocket objects
+AsyncWebServer server(80);
+AsyncWebSocket ws("/ws");
+
+// create custom class objects
+Preferences preferences; // create the preferences object for the flag
+NetworkManager networkManager(&preferences);
 TimeManager timeManager(MAIN_DEBUG); // create the time manager object
-PowerManager powerManager(MAIN_DEBUG); // create the power manager object
+PowerManager powerManager(MAIN_DEBUG, &preferences); // create the power manager object
 Camera camera; // create the camera object
-SensorIO sensors(              // create the sensor io class
-    &battery_level,
-    &ambient_temp,
-    &ambient_humidity,
-    &light_intensity,
-    &soil_temp,
-    &soil_moisture,
-    &soil_ec,
-    MAIN_DEBUG
-);
-MQTTClient mqtt(                // create the mqtt client object
-  &ccu_address,
-  &powerManager,
-  MAIN_DEBUG
-);
-Dashboard dashboard(
-    &battery_level,
-    &ambient_temp,
-    &ambient_humidity,
-    &light_intensity,
-    &soil_temp,
-    &soil_moisture,
-    &soil_ec,
-    &camera,
-    &ccu_address,
-    &powerManager,              // Pass power manager instance
-    &sendSensorData,            // Pass sensor data sending function
-    &sendAllData,               // Pass all data sending function
-    &performOnDemandSensorRead,
-    "defaultPW",                // Access Point Password
-    MAIN_DEBUG
-);
-Preferences preferences;       // create the preferences object for the flag
+SensorIO sensors( &battery_level, &ambient_temp, &ambient_humidity, &light_intensity, &soil_temp, &soil_moisture, &soil_ec, MAIN_DEBUG );
+MQTTClient mqtt( &ccu_address, &powerManager, MAIN_DEBUG );
 
 // --- Global flag for current mode ---
 bool isSetupMode = false; // flag to determine the current operating mode
@@ -122,53 +100,41 @@ void handleWakeupReason(){
 
 // --- Action Functions (called by dashboard or MQTT) ---
 void sendSensorData() {
-    // in setup mode, send command to the background task queue
-    if (isSetupMode) {
-        Command cmd = CMD_SEND_SENSORS;
-        xQueueSend(commandQueue, &cmd, portMAX_DELAY);
-    } else {
-        // in normal mode, execute directly
-        if (!dashboard.isConnected()) {
-            DEBUG_MAIN_PRINTLN("[WARN] Not connected to WiFi, cannot send data.");
-            return;
-        }
-        delay(250); // for stabilize
-        sensors.readAllSensors(0);
-        JsonDocument dataDoc;
-        dataDoc["bat_level"] = battery_level;
-        dataDoc["amb_temp"] = ambient_temp;
-        dataDoc["amb_humi"] = ambient_humidity;
-        dataDoc["amb_light"] = light_intensity;
-        dataDoc["soil_temp"] = soil_temp;
-        dataDoc["soil_humi"] = soil_moisture;
-        dataDoc["soil_ec"] = soil_ec;
-        String output;
-        serializeJson(dataDoc, output);
-        mqtt.loop();
-        mqtt.publishData(output);
+    if (!WiFi.isConnected()) {
+        DEBUG_MAIN_PRINTLN("[WARN] Not connected to WiFi, cannot send data.");
+        return;
     }
+    delay(250); // for stabilize
+    sensors.readAllSensors(0);
+    JsonDocument dataDoc;
+    dataDoc["bat_level"] = battery_level;
+    dataDoc["amb_temp"] = ambient_temp;
+    dataDoc["amb_humi"] = ambient_humidity;
+    dataDoc["amb_light"] = light_intensity;
+    dataDoc["soil_temp"] = soil_temp;
+    dataDoc["soil_humi"] = soil_moisture;
+    dataDoc["soil_ec"] = soil_ec;
+    String output;
+    serializeJson(dataDoc, output);
+    mqtt.loop();
+    mqtt.publishData(output);
 }
 
 void sendCameraData() {
-    if (!dashboard.isConnected()) return; // exit if not connected
-
+    if (!WiFi.isConnected()) return; // exit if not connected
     delay(250); // for stabilize
-
     DEBUG_MAIN_PRINTLN("[ACTION] Capturing high quality frame to send...");
     camera_fb_t* fb = camera.captureFrameForAnalyze(); // capture a high quality frame
-
     if (fb) { // if frame capture was successful
         DEBUG_MAIN_PRINTLN("[DEBUG] Frame captured successfully.");
         size_t output_len;
-        // calculate the required buffer size for base64
         mbedtls_base64_encode(NULL, 0, &output_len, fb->buf, fb->len);
-        unsigned char *base64_buf = (unsigned char *)malloc(output_len + 1); // +1 for null terminator
+        unsigned char *base64_buf = (unsigned char *)malloc(output_len + 1);
         if (base64_buf == NULL) {
             DEBUG_MAIN_PRINTLN("[ERROR] Failed to allocate memory for Base64 buffer!");
             camera.releaseFrameForAnalyze(fb);
             return;
         }
-        // perform the actual encoding
         if(mbedtls_base64_encode(base64_buf, output_len + 1, &output_len, fb->buf, fb->len) != 0) {
             DEBUG_MAIN_PRINTLN("[ERROR] Base64 encoding failed!");
             free(base64_buf);
@@ -176,7 +142,6 @@ void sendCameraData() {
             return;
         }
         base64_buf[output_len] = '\0'; // ensure null termination
-
         JsonDocument dataDoc;
         dataDoc["plant_img"] = (char*)base64_buf;
         String output;
@@ -191,16 +156,9 @@ void sendCameraData() {
 }
 
 void sendAllData() {
-    // in setup mode, send command to the background task
-    if (isSetupMode) {
-        Command cmd = CMD_SEND_ALL;
-        xQueueSend(commandQueue, &cmd, portMAX_DELAY);
-    } else {
-        // in normal mode, execute directly
-        sendSensorData();
-        delay(100); // Small delay between sends
-        sendCameraData();
-    }
+    sendSensorData();
+    delay(100); // Small delay between sends
+    sendCameraData();
 }
 
 void handleDataRequest() {
@@ -220,25 +178,7 @@ void handleConfig(JsonDocument& doc, PowerManager& pm) {
     }
 }
 
-void print_memory_status(const char* step) {
-    DEBUG_MAIN_PRINT("--- Memory Status after ");
-    DEBUG_MAIN_PRINT(step);
-    DEBUG_MAIN_PRINTLN(" ---");
-    DEBUG_MAIN_PRINT("Free Heap: ");
-    DEBUG_MAIN_PRINT(ESP.getFreeHeap());
-    DEBUG_MAIN_PRINTLN(" bytes");
-    if (psramFound()) {
-        DEBUG_MAIN_PRINT("Free PSRAM: ");
-        DEBUG_MAIN_PRINT(ESP.getFreePsram());
-        DEBUG_MAIN_PRINTLN(" bytes");
-    } else {
-        DEBUG_MAIN_PRINTLN("No PSRAM found!");
-    }
-    DEBUG_MAIN_PRINTLN("--------------------------------------");
-}
-
 void performOnDemandSensorRead() {
-    // this function is called by the background task in setup mode
     DEBUG_MAIN_PRINTLN("[ACTION] On-demand sensor read initiated.");
     delay(100);
     sensors.begin(); // Initializes I2C and sensors
@@ -249,72 +189,85 @@ void performOnDemandSensorRead() {
     DEBUG_MAIN_PRINTLN("[ACTION] On-demand sensor read complete. I2C released.");
 }
 
+// this function replaces placeholders in the html template
+String processor(const String& var){
+  if(var == "DASHBOARD_TITLE"){ return "GreenEye 센서단말<br>[" + networkManager.getHostname() + "]"; }
+  if(var == "CURRENT_SSID"){
+    preferences.begin("wifi-creds", true);
+    String ssid = preferences.getString("ssid", "N/A");
+    preferences.end();
+    return ssid;
+  }
+  if(var == "CURRENT_CCU_ADDRESS"){
+    preferences.begin("wifi-creds", true);
+    String ccu = preferences.getString("ccu_address", "Not Set");
+    preferences.end();
+    return ccu;
+  }
+  return String();
+}
+
 // --- RTOS Task Functions ---
-void webServerTask(void *parameter) {
-    DEBUG_MAIN_PRINTLN("WebServer Task started on core 1.");
-    for (;;) {
-        dashboard.loop(); // handle web server requests continuously
-        vTaskDelay(pdMS_TO_TICKS(10)); // yield to other tasks
-    }
+void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) { 
+    switch (type) { 
+        case WS_EVT_CONNECT: 
+            Serial.printf("[WebSocket] Client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str()); 
+            // if this is the first client, resume the camera task 
+            if (ws.count() == 1 && cameraTaskHandle != NULL) { 
+                Serial.println("[ACTION] First WebSocket client connected, resuming camera task."); 
+                vTaskResume(cameraTaskHandle); 
+            } 
+            break; 
+        case WS_EVT_DISCONNECT: 
+            Serial.printf("[WebSocket] Client #%u disconnected\n", client->id()); 
+            // if the last client disconnected, suspend the camera task to save resources 
+            if (ws.count() == 0 && cameraTaskHandle != NULL) { 
+                Serial.println("[ACTION] Last WebSocket client disconnected, suspending camera task."); 
+                vTaskSuspend(cameraTaskHandle); 
+            } 
+            break; 
+        case WS_EVT_DATA: 
+            // data event 
+        break; 
+        case WS_EVT_PONG: 
+        case WS_EVT_ERROR: 
+            // other events 
+        break; 
+    } 
+} 
+
+void cameraStreamTask(void *pvParameters) {
+  while (1) {
+    if (ws.count() > 0) {
+      camera_fb_t *fb = camera.captureFrameForStream();
+      if (fb) {
+        ws.binaryAll(fb->buf, fb->len);
+        camera.releaseFrameForStream(fb);
+      }
+    } else { vTaskDelay(pdMS_TO_TICKS(100)); }
+    vTaskDelay(pdMS_TO_TICKS(66)); // ~15 fps
+  }
 }
 
 void backgroundTask(void *parameter) {
     DEBUG_MAIN_PRINTLN("Background Task started on core 0.");
-    Command receivedCmd;
     static unsigned long buttonPressStartTime = 0;
-    
     for (;;) {
-        // handle incoming mqtt messages
         mqtt.loop();
-
-        // handle commands from the queue (e.g., from web dashboard)
-        if (xQueueReceive(commandQueue, &receivedCmd, 0) == pdPASS) {
-            if (receivedCmd == CMD_SEND_SENSORS) {
-                DEBUG_MAIN_PRINTLN("[RTOS] CMD_SEND_SENSORS received.");
-                performOnDemandSensorRead();
-                // re-create json data for mqtt publishing
-                JsonDocument dataDoc;
-                dataDoc["bat_level"] = battery_level;
-                dataDoc["amb_temp"] = ambient_temp;
-                dataDoc["amb_humi"] = ambient_humidity;
-                dataDoc["amb_light"] = light_intensity;
-                dataDoc["soil_temp"] = soil_temp;
-                dataDoc["soil_humi"] = soil_moisture;
-                dataDoc["soil_ec"] = soil_ec;
-                String output;
-                serializeJson(dataDoc, output);
-                mqtt.publishData(output);
-            } else if (receivedCmd == CMD_SEND_ALL) {
-                 DEBUG_MAIN_PRINTLN("[RTOS] CMD_SEND_ALL received.");
-                 performOnDemandSensorRead();
-                 // call the original functions to send data
-                 sendSensorData();
-                 delay(100);
-                 sendCameraData();
-            }
-        }
-
-        // handle button press to exit setup mode
         if (digitalRead(SETUP_BUTTON_PIN) == LOW) {
             if (buttonPressStartTime == 0) {
                 buttonPressStartTime = millis();
             } else if (millis() - buttonPressStartTime > 3000) {
                 DEBUG_MAIN_PRINTLN("[ACTION] Exiting Setup mode via button press. Restarting...");
+                preferences.begin("device-state", false);
                 preferences.putBool("setup_mode", false);
+                preferences.end();
                 ESP.restart();
             }
         } else {
             buttonPressStartTime = 0;
         }
-
-        // handle setup mode timeout
-        if (millis() > SETUP_MODE_TIMEOUT) {
-            DEBUG_MAIN_PRINTLN("[WARN] Setup mode timed out. Restarting...");
-            preferences.putBool("setup_mode", false);
-            ESP.restart();
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(20)); // main background loop delay
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
 
@@ -326,10 +279,8 @@ void setup() {
         Serial.begin(115200); // initialize serial communication
         delay(1000); // wait for serial monitor to open
     }
-
     if(!camera.begin()){ DEBUG_MAIN_PRINTLN("[ERROR] Failed to start camera"); } // initialize camera
-    print_memory_status("After camera init");
-
+    
     delay(2000); // wait for io pins to stabilize
     bootCount++; // increment the deep sleep wake-up counter
     DEBUG_MAIN_PRINT("[INFO] === Boot count: ");
@@ -337,7 +288,6 @@ void setup() {
 
     preferences.begin("device-state", false); // initialize preferences for the mode flag
     powerManager.begin();
-    
     handleWakeupReason(); // check why the device woke up
 
     bool enter_setup_flag = preferences.getBool("setup_mode", false); // check if the flag is set
@@ -346,132 +296,196 @@ void setup() {
         isSetupMode = true; // enter setup mode
     }
 
-    // initialize subsystems based on the selected mode
-    if (isSetupMode) {
+        if (isSetupMode) {
         DEBUG_MAIN_PRINTLN("[MODE] SETUP MODE ACTIVATED.");
-        ledcWrite(LEDC_CHANNEL, 0); delay(500);
-        ledcWrite(LEDC_CHANNEL, 10); delay(500);
-        ledcWrite(LEDC_CHANNEL, 0); delay(500);
-        ledcWrite(LEDC_CHANNEL, 10); delay(500);
-        ledcWrite(LEDC_CHANNEL, 0); delay(500);
-        dashboard.begin();
+        ledcWrite(LEDC_CHANNEL, 0); delay(500); ledcWrite(LEDC_CHANNEL, 10); delay(500);
+        ledcWrite(LEDC_CHANNEL, 0); delay(500); ledcWrite(LEDC_CHANNEL, 10); delay(500);
+        ledcWrite(LEDC_CHANNEL, 0);
+
+        networkManager.begin();
+        sensors.begin();
+
+        ws.onEvent(onWsEvent);
+        server.addHandler(&ws);
+        // setup all web server routes
+        server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+            DEBUG_MAIN_PRINTLN("[WebServer] Root ('/') page requested.");
+            const char* content = WiFi.isConnected() ? DEVICE_STATUS_CONTENT : SETUP_FORM_CONTENT;
+            // replace placeholders and send the page
+            request->send_P(200, "text/html", DASHBOARD_MAIN_TEMPLATE, [content](const String& var) -> String {
+                if (var == "PAGE_CONTENT") return FPSTR(content);
+                return processor(var);
+            });
+        });
+        server.on("/dashboard", HTTP_GET, [](AsyncWebServerRequest *request) {
+            DEBUG_MAIN_PRINTLN("[WebServer] Dashboard ('/dashboard') page requested.");
+            request->send_P(200, "text/html", DASHBOARD_MAIN_TEMPLATE, [](const String& var) -> String {
+                if (var == "PAGE_CONTENT") return FPSTR(DASHBOARD_CONTENT);
+                return processor(var);
+            });
+        });
+        server.on("/api/sensors", HTTP_GET, [](AsyncWebServerRequest *request){
+            DEBUG_MAIN_PRINTLN("[WebServer] API ('/api/sensors') data requested.");
+            sensors.readAllSensors(0);
+            
+            JsonDocument dataDoc;
+            dataDoc["bat_level"] = battery_level;
+            dataDoc["pwr_mode"] = powerManager.getModeString();
+            dataDoc["night_mode"] = powerManager.isNightModeEnabled() ? "ON" : "OFF";
+            dataDoc["amb_temp"] = ambient_temp;
+            dataDoc["amb_humi"] = ambient_humidity;
+            dataDoc["amb_light"] = light_intensity;
+            dataDoc["soil_temp"] = soil_temp;
+            dataDoc["soil_humi"] = soil_moisture;
+            dataDoc["soil_ec"] = soil_ec;
+            
+            String output;
+     
+            serializeJson(dataDoc, output);
+            request->send(200, "application/json", output);
+        });
+        server.on("/camera", HTTP_GET, [](AsyncWebServerRequest *request){
+            DEBUG_MAIN_PRINTLN("[WebServer] Camera ('/camera') page requested.");
+            request->send_P(200, "text/html", WEBSOCKET_CAMERA_PAGE_HTML, processor);
+        });
+        server.on("/debug", HTTP_GET, [](AsyncWebServerRequest *request){
+            DEBUG_MAIN_PRINTLN("[WebServer] Debug ('/debug') page requested.");
+            request->send_P(200, "text/html", DASHBOARD_MAIN_TEMPLATE, [](const String& var) -> String {
+                if (var == "PAGE_CONTENT") return FPSTR(DEBUG_PAGE_CONTENT);
+                return processor(var);
+            });
+        });
+        // handle form submissions
+        server.on("/save", HTTP_POST, [](AsyncWebServerRequest *request){
+            DEBUG_MAIN_PRINTLN("[WebServer] POST to '/save' received.");
+            preferences.begin("wifi-creds", false);
+            if(request->hasParam("ssid", true)) preferences.putString("ssid", request->getParam("ssid", true)->value());
+            if(request->hasParam("password", true)) preferences.putString("password", request->getParam("password", true)->value());
+            if(request->hasParam("ccu_address", true)) preferences.putString("ccu_address", request->getParam("ccu_address", true)->value());
+            preferences.end();
+            request->send_P(200, "text/html", SUCCESS_PAGE_HTML);
+            delay(1000); ESP.restart();
+        });
+        server.on("/forget", HTTP_POST, [](AsyncWebServerRequest *request){
+            DEBUG_MAIN_PRINTLN("[WebServer] POST to '/forget' received.");
+            preferences.begin("wifi-creds", false);
+            preferences.clear();
+            preferences.end();
+            DEBUG_MAIN_PRINTLN("[INFO] Clear preference!");
+            request->send_P(200, "text/html", SUCCESS_PAGE_HTML);
+            delay(1000); ESP.restart();
+        });
+        server.on("/save_ccu", HTTP_POST, [](AsyncWebServerRequest *request){
+            DEBUG_MAIN_PRINTLN("[WebServer] POST to '/save_ccu' received.");
+            preferences.begin("wifi-creds", false);
+            if(request->hasParam("ccu_address", true)) preferences.putString("ccu_address", request->getParam("ccu_address", true)->value());
+            preferences.end();
+            request->redirect("/");
+        });
+        server.on("/set_power_mode", HTTP_POST, [](AsyncWebServerRequest *request){
+            DEBUG_MAIN_PRINTLN("[WebServer] POST to '/set_power_mode' received.");
+            if(request->hasParam("pwr_mode", true)) {
+                String mode = request->getParam("pwr_mode", true)->value();
+                powerManager.setMode(mode[0]);
+            }
+            request->redirect("/debug");
+        });
+        server.on("/set_night_mode", HTTP_POST, [](AsyncWebServerRequest *request){
+            DEBUG_MAIN_PRINTLN("[WebServer] POST to '/set_night_mode' received.");
+            if(request->hasParam("nht_mode", true)) {
+                bool nightMode = request->getParam("nht_mode", true)->value().toInt() == 1;
+                powerManager.setNightMode(nightMode);
+            }
+            request->redirect("/debug");
+        });
+
+        server.on("/send_sensor", HTTP_POST, [](AsyncWebServerRequest *request){
+            DEBUG_MAIN_PRINTLN("[WebServer] POST to '/send_sensor' received.");
+            sendSensorData(); // call the function to send sensor data
+            request->redirect("/debug"); // redirect back to the debug page
+        });
+
+        server.on("/send_all", HTTP_POST, [](AsyncWebServerRequest *request){
+            DEBUG_MAIN_PRINTLN("[WebServer] POST to '/send_all' received.");
+            sendAllData(); // call the function to send all data (sensor + camera)
+            request->redirect("/debug"); // redirect back to the debug page
+        });
+
+        server.begin(); // start server
+
+        // create rtos tasks for setup mode
+        xTaskCreatePinnedToCore(backgroundTask, "Background Task", 4096, NULL, 1, &backgroundTaskHandle, 0);
+        xTaskCreatePinnedToCore(cameraStreamTask, "Camera Stream Task", 4096, NULL, 2, &cameraTaskHandle, 0);
+
+        if (cameraTaskHandle != NULL) { 
+            vTaskSuspend(cameraTaskHandle); 
+        } 
     } else {
         DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED."); 
-        ledcWrite(LEDC_CHANNEL, 0); delay(500);
-        ledcWrite(LEDC_CHANNEL, 10);
-        dashboard.beginWiFi(); // wifi only
-        sensors.begin(); // initialize sensors
+        ledcWrite(LEDC_CHANNEL, 0); delay(500); ledcWrite(LEDC_CHANNEL, 10); delay(500);
+        ledcWrite(LEDC_CHANNEL, 0);
+        networkManager.begin();
+        sensors.begin();
     }
 
-    performOnDemandSensorRead(); // init sensing
-
-    DEBUG_MAIN_PRINT("[ACTION] Connecting to WiFi");
-    int connection_timeout = 30; // wait for ~15 seconds
-    while (WiFi.status() != WL_CONNECTED && connection_timeout > 0) {
-        delay(500);
-        DEBUG_MAIN_PRINT(".");
-        connection_timeout--;
-    }
-    DEBUG_MAIN_PRINTLN("Complete!");
-
-    // Initialize MQTT and TimeManager only if WiFi is connected
     if (WiFi.status() == WL_CONNECTED) {
-        DEBUG_MAIN_PRINTLN("\n[INFO] MQTT Initialize.");
-        mqtt.onDataRequest(handleDataRequest); // register the data request callback
-        mqtt.onConfig(handleConfig); // register the config callback
-        mqtt.begin(); // initialize mqtt client
-        
-        // initialize time manager and sync time
+        DEBUG_MAIN_PRINTLN("[INFO] WiFi connected! setup logic start!");
+        mqtt.onDataRequest(handleDataRequest);
+        mqtt.onConfig(handleConfig);
+        mqtt.begin();
         timeManager.begin();
         timeManager.updateTime();
     } else {
-        DEBUG_MAIN_PRINTLN("\n[WARN] WiFi connection failed in setup.");
         if (!isSetupMode) {
              DEBUG_MAIN_PRINTLN("[ACTION] No WiFi in Normal Mode, entering setup mode on next boot.");
              preferences.putBool("setup_mode", true);
              ESP.restart();
         }
     }
-    print_memory_status("After WiFi init");
-
-    if(isSetupMode) {
-        // create a queue for commands between tasks
-        commandQueue = xQueueCreate(5, sizeof(Command));
-
-        // create rtos tasks for setup mode
-        // pin web server to core 1, background to core 0
-        xTaskCreatePinnedToCore(
-            webServerTask,
-            "WebServer Task",
-            4096, // stack size
-            NULL,
-            1,    // priority
-            &webServerTaskHandle,
-            1
-        );
-        xTaskCreatePinnedToCore(
-            backgroundTask,
-            "Background Task",
-            4096, // stack size
-            NULL,
-            1,    // priority
-            &backgroundTaskHandle,
-            0
-        );
-    }
 }
 
 void loop() {
   if (isSetupMode) {
     // the loop is empty in setup mode because rtos tasks are running
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    //vTaskDelay(pdMS_TO_TICKS(10));
   } else {
     // --- Normal Mode: Sense, Transmit, Sleep ---
     ledcWrite(LEDC_CHANNEL, 0);
-    // check if should enter the periodic night sleep cycle
     if (powerManager.isNightModeEnabled() && timeManager.isNightTime() && powerManager.getCurrentMode() != DEBUGGING) {
         DEBUG_MAIN_PRINTLN("[INFO] Night mode active. Woke up to check for MQTT updates.");
-        // try to connect and check MQTT messages
         if (WiFi.status() == WL_CONNECTED && mqtt.loop()) {
             DEBUG_MAIN_PRINTLN("[INFO] MQTT check complete.");
         } else {
             DEBUG_MAIN_PRINTLN("[WARN] Could not connect to WiFi/MQTT during night check.");
         }
-        // calculate sleep time (max 10 mins, or until 6 AM) and go back to sleep
         unsigned long sleep_duration_seconds = min(10UL * 60, timeManager.getSecondsUntil6AM());
-        if (sleep_duration_seconds > 10) { // a small threshold to prevent sleeping for a few seconds if it's already 6 AM
+        if (sleep_duration_seconds > 10) { 
             powerManager.enterDeepSleep(sleep_duration_seconds);
         } else {
             DEBUG_MAIN_PRINTLN("[INFO] Night mode period ending. Proceeding to normal operation.");
         }
     } 
-    // if not in the night cycle, execute normal daytime operation
     else {
-        if (WiFi.status() == WL_CONNECTED) { // if wifi connected successfully
+        if (WiFi.status() == WL_CONNECTED) { 
           DEBUG_MAIN_PRINTLN("[INFO] WiFi Connected.");
-          if (mqtt.loop()) { // mqtt.loop() also handles incoming messages
+          if (mqtt.loop()) { 
               DEBUG_MAIN_PRINTLN("[INFO] MQTT broker connected.");
-              // always send sensor data on wakeup in normal mode
               sendSensorData();
-              // check if it's time to send camera data
               if (powerManager.shouldSendCameraData(bootCount)) {
                   sendCameraData();
               }
-              
-              delay(2000); // wait for data to be sent before sleeping
+              delay(2000);
               sensors.endI2C();
-              // enter deep sleep for the configured interval
               powerManager.enterDeepSleep(powerManager.getSenseInterval());
           } else {
-              // MQTT connection failed after retries
               DEBUG_MAIN_PRINTLN("\n[ERROR] Failed to connect to MQTT broker, entering setup mode on next boot.");
               preferences.putBool("setup_mode", true);
-              ESP.restart(); // Restart to switch to setup mode immediately
+              ESP.restart();
           }
         } else {
           DEBUG_MAIN_PRINTLN("\n[ERROR] Failed to connect to WiFi, entering setup mode on next boot.");
           preferences.putBool("setup_mode", true);
-          ESP.restart(); // Restart to switch to setup mode immediately
+          ESP.restart();
         }
     }
   }

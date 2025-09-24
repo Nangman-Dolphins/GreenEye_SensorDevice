@@ -22,7 +22,7 @@ private:
     bool _nightModeEnabled;     // flag for night deep sleep mode
     unsigned long _senseInterval; // interval for sensor reading in seconds
     unsigned long _camInterval;   // interval for camera capture in seconds
-    Preferences _preferences;   // non-volatile storage handler
+    Preferences *_p_preferences;   // non-volatile storage handler
     bool _debug_enabled;        // flag for debug mode
 
     void updateIntervals() { // updates the intervals based on the current mode
@@ -41,18 +41,19 @@ private:
     }
 
 public:
-    PowerManager(bool debug = false) : 
+    PowerManager(bool debug, Preferences* p_prefs) : 
         _currentMode(NORMAL),        // set default power mode
         _nightModeEnabled(true),     // enable night mode by default
-        _debug_enabled(debug)        // set debug mode from argument
+        _debug_enabled(debug),       // set debug mode from argument
+        _p_preferences(p_prefs)
     {
         updateIntervals(); // set initial intervals for the default mode
     }
 
     void begin() { // loads saved settings from non-volatile storage
-        _preferences.begin("power-mgmt", false); // initialize preferences with a namespace
-        char savedMode = _preferences.getChar("pwr_mode", 'M'); // load saved mode, default to 'm'
-        _nightModeEnabled = _preferences.getBool("nht_mode", true); // load night mode setting, default to true
+        _p_preferences->begin("power-mgmt", false); // initialize preferences with a namespace
+        char savedMode = _p_preferences->getChar("pwr_mode", 'M'); // load saved mode, default to 'm'
+        _nightModeEnabled = _p_preferences->getBool("nht_mode", true); // load night mode setting, default to true
         setMode(savedMode); // apply the loaded or default mode
         if (_debug_enabled) { Serial.println("[PM] PowerManager initialized."); }
     }
@@ -74,14 +75,14 @@ public:
         
         if (newMode != _currentMode) { // if the mode actually changed
             setMode(newMode); // call the main setMode function
-            _preferences.putChar("pwr_mode", modeChar); // save the new mode to storage
+            _p_preferences->putChar("pwr_mode", modeChar); // save the new mode to storage
             if (_debug_enabled) { Serial.printf("[PM] Power mode set to '%c' and saved.\n", modeChar); }
         }
     }
     
     void setNightMode(bool enabled) { // enables or disables night mode
         _nightModeEnabled = enabled; // update the internal flag
-        _preferences.putBool("nht_mode", enabled); // save the setting to storage
+        _p_preferences->putBool("nht_mode", enabled); // save the setting to storage
         if (_debug_enabled) { Serial.printf("[PM] Night mode set to: %s and saved.\n", enabled ? "ON" : "OFF"); }
     }
     

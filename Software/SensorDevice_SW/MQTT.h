@@ -36,13 +36,11 @@ private:
                 return false; // give up and return failure
             }
 
-            if (_debug_enabled) { Serial.printf("Attempting MQTT connection... (%d retries left)\n", retries); }
+            if (_debug_enabled) { Serial.printf("[MQTT] Attempting MQTT connection... (%d retries left)\n", retries); }
             
             if ((*_p_ccu_address).isEmpty()) { // if ccu address is not set
-                if (_debug_enabled) { Serial.println(" CCU address not set. Retrying in 5 seconds..."); }
-                delay(5000); // wait and retry
-                retries--;
-                continue;    // skip the rest of the loop
+                if (_debug_enabled) { Serial.println("[MQTT] CCU address not set."); }
+                return false;
             }
 
             if (_mqttClient.connect(_device_id.c_str())) { // attempt to connect
@@ -56,7 +54,7 @@ private:
                     Serial.print(_mqttClient.state());
                     Serial.println(" try again in 5 seconds");
                 }
-                delay(5000); // wait 5 seconds before retrying
+                delay(10); // wait 5 seconds before retrying
                 retries--;
             }
         }
@@ -123,10 +121,11 @@ public:
     void begin() { // sets the mqtt server and port
         if (!(*_p_ccu_address).isEmpty()) { // if ccu address is available
             _mqttClient.setServer((*_p_ccu_address).c_str(), 1883); // set the mqtt server
+            if (_debug_enabled) { Serial.print("MQTT setServer with "); Serial.println(*_p_ccu_address); }
             _last_ccu_address = *_p_ccu_address; // store it as the last known address
         }
 
-        _mqttClient.setBufferSize(32786);
+        _mqttClient.setBufferSize(65535);
     }
 
     // returns true if connected, false if connection fails after retries
@@ -134,8 +133,9 @@ public:
         if ((*_p_ccu_address).isEmpty()) return false; // do nothing if ccu address is not set
 
         if (*_p_ccu_address != _last_ccu_address) { // if the server address has changed in the dashboard
-            if (_debug_enabled) { Serial.println("CCU address has changed. Reconfiguring MQTT client."); }
+            if (_debug_enabled) { Serial.println("[MQTT] CCU address has changed. Reconfiguring MQTT client."); }
             _mqttClient.setServer((*_p_ccu_address).c_str(), 1883); // update the server address
+            if (_debug_enabled) { Serial.print("[MQTT] setServer with "); Serial.println(*_p_ccu_address); }
             _last_ccu_address = *_p_ccu_address; // save the new address
             if (_mqttClient.connected()) { // if connected to the old server
                 _mqttClient.disconnect(); // disconnect to force a reconnect to the new server
