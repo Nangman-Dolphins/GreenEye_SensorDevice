@@ -1,7 +1,5 @@
 #pragma once
 
-static const char* BUILD_TIMESTAMP = __DATE__ " " __TIME__;
-
 // --- HTML Content Pages ---
 static const char DASHBOARD_MAIN_TEMPLATE[] PROGMEM = R"rawliteral(
 <!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>ESP32 Dashboard</title>
@@ -146,7 +144,36 @@ p{color:#555;font-size:1.1rem;}
 </style></head>
 <body><div class="container">
 <svg class="icon" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"></path></svg>
-<h1>저장 완료!</h1><p>WiFi 정보가 저장되었습니다.<br>잠시 후(<span id="countdown">10</span>초) 메인 페이지로 이동합니다...</p>
+<h1>저장 완료!</h1><p>네트워크 정보가 저장되었습니다.<br>잠시 후(<span id="countdown">10</span>초) 메인 페이지로 이동합니다...</p>
+</div>
+<script>
+  var countdownElement = document.getElementById('countdown');
+  var seconds = 10;
+  var interval = setInterval(function() {
+    seconds--;
+    countdownElement.textContent = seconds;
+    if (seconds <= 0) {
+      clearInterval(interval);
+    }
+  }, 1000);
+</script>
+</body></html>
+)rawliteral";
+
+static const char FORGET_SUCCESS_PAGE_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="refresh" content="10; url=/">
+<title>정보 삭제됨</title>
+<style>
+body{font-family:Arial,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background-color:#f0f2f5;margin:0}
+.container{background-color:#fff;padding:3rem;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.1);text-align:center}
+.icon{width:50px;height:50px;margin-bottom:1rem;fill:#dc3545}
+h1{color:#dc3545;margin-bottom:1rem;}
+p{color:#555;font-size:1.1rem;}
+</style></head>
+<body><div class="container">
+<svg class="icon" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"></path></svg>
+<h1>삭제 완료!</h1><p>저장된 네트워크 정보가 삭제되었습니다.<br>잠시 후(<span id="countdown">10</span>초) 메인 페이지로 이동합니다...</p>
 </div>
 <script>
   var countdownElement = document.getElementById('countdown');
