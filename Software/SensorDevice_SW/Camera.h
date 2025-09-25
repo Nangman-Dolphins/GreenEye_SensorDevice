@@ -96,6 +96,8 @@ public:
             // --- Special Effects ---
             s->set_special_effect(s, 0);         // no special effects
 
+            s->set_vflip(s, 1); // enable vertical flip
+
         } else {
             return false;
         }
