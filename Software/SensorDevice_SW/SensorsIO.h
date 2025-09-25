@@ -65,12 +65,12 @@ private:
     }
 
     float getCalibratedEC(float adc_value) {
-        const int NUM_CAL_POINTS = 9;
+        const int NUM_CAL_POINTS = 10;
         const float adc_points[NUM_CAL_POINTS] = {
-            310.4, 574.8, 657.9, 931.5, 1069.7, 1112.9, 1158.6, 1425.7, 1489.7
+            200.0, 310.4, 574.8, 657.9, 931.5, 1069.7, 1112.9, 1158.6, 1425.7, 1489.7
         };
         const float ec25_points[NUM_CAL_POINTS] = {
-            23.9, 101.8, 167.3, 174.6, 426.5, 881.8, 1370.9, 2961.5, 5295.0
+            5.4, 23.9, 101.8, 167.3, 174.6, 426.5, 881.8, 1370.9, 2961.5, 5295.0
         };
 
         // Multi point linear interpolation
@@ -266,7 +266,6 @@ public:
         int valid_readings = 0;
         for (int i = 0; i < SENSOR_AVG_COUNT; i++) {
             int16_t adcValue = readADS1015(1);
-            if (_debug_enabled) { Serial.printf("  [RAW] Reading #%d: ADC=%d\n", i + 1, adcValue); }
             if (adcValue >= 0) {
                 total += adcValue;
                 valid_readings++;
@@ -326,7 +325,7 @@ public:
         if (rawMode == 1) {
             *_p_moisture = avgAdcValue;
         } else {
-            *_p_moisture = map(avgAdcValue, 0, 2047, 100, 0);
+            *_p_moisture = map(avgAdcValue, 0, 1900, 1200, 0);
             if (_debug_enabled) Serial.printf("  [DEBUG] Soil Moisture Percentage: %.2f %%\n", *_p_moisture);
         }
     }
@@ -335,7 +334,7 @@ public:
         if (!_p_ec || !_p_temp_soil) return;
         if (_debug_enabled) Serial.println("[SensorIO] Reading Soil EC...");
         
-        float total_avg_reading = 0.0f; // float 타입으로 변경
+        float total_avg_reading = 0.0f;
         int valid_readings = 0;
 
         pinMode(EC_PIN1, OUTPUT);
@@ -355,7 +354,6 @@ public:
             int reading2 = readADS1015(3);
             
             if (reading1 >= 0 && reading2 >= 0) {
-                // 모든 계산을 float으로 수행하여 정밀도 유지
                 total_avg_reading += (reading1 + (2047.0f - reading2)) / 2.0f;
                 valid_readings++;
             }
