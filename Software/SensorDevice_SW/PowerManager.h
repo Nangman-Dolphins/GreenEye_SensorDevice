@@ -20,11 +20,11 @@ class PowerManager {
 private:
     PowerMode _currentMode;     // holds the current power mode
     bool _nightModeEnabled;     // flag for night deep sleep mode
+    bool _debug_enabled;        // flag for debug mode
+    Preferences *_p_preferences;  // non-volatile storage handler
     unsigned long _senseInterval; // interval for sensor reading in seconds
     unsigned long _camInterval;   // interval for camera capture in seconds
-    Preferences *_p_preferences;   // non-volatile storage handler
-    bool _debug_enabled;        // flag for debug mode
-
+    
     void updateIntervals() { // updates the intervals based on the current mode
         switch (_currentMode) {
             case ULTRA_LOW_POWER: _senseInterval = 2 * 3600; _camInterval = 4 * 3600; break;
