@@ -245,7 +245,7 @@ void cameraStreamTask(void *pvParameters) {
         camera.releaseFrameForStream(fb);
       }
     } else { vTaskDelay(pdMS_TO_TICKS(100)); }
-    vTaskDelay(pdMS_TO_TICKS(66)); // ~15 fps
+    vTaskDelay(pdMS_TO_TICKS(100)); // ~10 fps
   }
 }
 
@@ -274,7 +274,7 @@ void backgroundTask(void *parameter) {
 void setup() {
     ledcSetup(LEDC_CHANNEL, LEDC_FREQ, LEDC_RESOLUTION);
     ledcAttachPin(FLASH_PIN, LEDC_CHANNEL);
-    ledcWrite(LEDC_CHANNEL, 10);
+    ledcWrite(LEDC_CHANNEL, 1);
     if(MAIN_DEBUG){
         Serial.begin(115200); // initialize serial communication
         delay(1000); // wait for serial monitor to open
@@ -289,17 +289,17 @@ void setup() {
     preferences.begin("device-state", false); // initialize preferences for the mode flag
     powerManager.begin();
     handleWakeupReason(); // check why the device woke up
-
     bool enter_setup_flag = preferences.getBool("setup_mode", false); // check if the flag is set
     if (enter_setup_flag) {
         DEBUG_MAIN_PRINTLN("[DEBUG] SETUP MODE FLAG is HIGH.");
         isSetupMode = true; // enter setup mode
     }
+    preferences.end();
 
         if (isSetupMode) {
         DEBUG_MAIN_PRINTLN("[MODE] SETUP MODE ACTIVATED.");
-        ledcWrite(LEDC_CHANNEL, 0); delay(500); ledcWrite(LEDC_CHANNEL, 10); delay(500);
-        ledcWrite(LEDC_CHANNEL, 0); delay(500); ledcWrite(LEDC_CHANNEL, 10); delay(500);
+        ledcWrite(LEDC_CHANNEL, 0); delay(500); ledcWrite(LEDC_CHANNEL, 1); delay(500);
+        ledcWrite(LEDC_CHANNEL, 0); delay(500); ledcWrite(LEDC_CHANNEL, 1); delay(500);
         ledcWrite(LEDC_CHANNEL, 0);
 
         networkManager.begin();
@@ -358,10 +358,18 @@ void setup() {
         // handle form submissions
         server.on("/save", HTTP_POST, [](AsyncWebServerRequest *request){
             DEBUG_MAIN_PRINTLN("[WebServer] POST to '/save' received.");
+            String getSsid = (request->hasParam("ssid", true)) ? request->getParam("ssid", true)->value():"";
+            String getPw = (request->hasParam("password", true)) ? request->getParam("password", true)->value():"";
+            String getCcuAddr = (request->hasParam("ccu_address", true)) ? request->getParam("ccu_address", true)->value():"";
+            DEBUG_MAIN_PRINTLN("[INFO] Recieved Network datas");
+            DEBUG_MAIN_PRINT("     SSID : "); DEBUG_MAIN_PRINTLN(getSsid);
+            DEBUG_MAIN_PRINT("     PW : "); DEBUG_MAIN_PRINTLN(getPw);
+            DEBUG_MAIN_PRINT("     CCU ADDR : "); DEBUG_MAIN_PRINTLN(getCcuAddr);
+
             preferences.begin("wifi-creds", false);
-            if(request->hasParam("ssid", true)) preferences.putString("ssid", request->getParam("ssid", true)->value());
-            if(request->hasParam("password", true)) preferences.putString("password", request->getParam("password", true)->value());
-            if(request->hasParam("ccu_address", true)) preferences.putString("ccu_address", request->getParam("ccu_address", true)->value());
+            preferences.putString("ssid", getSsid);
+            preferences.putString("password", getPw);
+            preferences.putString("ccu_address", getCcuAddr);
             preferences.end();
             request->send_P(200, "text/html", SUCCESS_PAGE_HTML);
             delay(1000); ESP.restart();
@@ -369,10 +377,12 @@ void setup() {
         server.on("/forget", HTTP_POST, [](AsyncWebServerRequest *request){
             DEBUG_MAIN_PRINTLN("[WebServer] POST to '/forget' received.");
             preferences.begin("wifi-creds", false);
-            preferences.clear();
+            preferences.remove("ssid");
+            preferences.remove("password");
+            preferences.remove("ccu_address");
             preferences.end();
             DEBUG_MAIN_PRINTLN("[INFO] Clear preference!");
-            request->send_P(200, "text/html", SUCCESS_PAGE_HTML);
+            request->send_P(200, "text/html", FORGET_SUCCESS_PAGE_HTML);
             delay(1000); ESP.restart();
         });
         server.on("/save_ccu", HTTP_POST, [](AsyncWebServerRequest *request){
@@ -380,7 +390,9 @@ void setup() {
             preferences.begin("wifi-creds", false);
             if(request->hasParam("ccu_address", true)) preferences.putString("ccu_address", request->getParam("ccu_address", true)->value());
             preferences.end();
-            request->redirect("/");
+            request->send_P(200, "text/html", SUCCESS_PAGE_HTML);
+            delay(1000);
+            ESP.restart();
         });
         server.on("/set_power_mode", HTTP_POST, [](AsyncWebServerRequest *request){
             DEBUG_MAIN_PRINTLN("[WebServer] POST to '/set_power_mode' received.");
@@ -422,7 +434,7 @@ void setup() {
         } 
     } else {
         DEBUG_MAIN_PRINTLN("[MODE] NORMAL MODE ACTIVATED."); 
-        ledcWrite(LEDC_CHANNEL, 0); delay(500); ledcWrite(LEDC_CHANNEL, 10); delay(500);
+        ledcWrite(LEDC_CHANNEL, 0); delay(500); ledcWrite(LEDC_CHANNEL, 1); delay(500);
         ledcWrite(LEDC_CHANNEL, 0);
         networkManager.begin();
         sensors.begin();
@@ -438,9 +450,21 @@ void setup() {
     } else {
         if (!isSetupMode) {
              DEBUG_MAIN_PRINTLN("[ACTION] No WiFi in Normal Mode, entering setup mode on next boot.");
+             preferences.begin("device-state", false);
              preferences.putBool("setup_mode", true);
+             preferences.end();
              ESP.restart();
         }
+    }
+
+    // load ccu address from preferences into the global variable
+    preferences.begin("wifi-creds", true); // open in read-only mode
+    ccu_address = preferences.getString("ccu_address", "");
+    preferences.end();
+
+    if (MAIN_DEBUG && !ccu_address.isEmpty()) {
+        DEBUG_MAIN_PRINT("[INFO] Loaded CCU Address: ");
+        DEBUG_MAIN_PRINTLN(ccu_address);
     }
 }
 
