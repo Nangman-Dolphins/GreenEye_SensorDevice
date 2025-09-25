@@ -52,9 +52,9 @@ private:
                 if (_debug_enabled) {
                     Serial.print("failed, rc=");
                     Serial.print(_mqttClient.state());
-                    Serial.println(" try again in 5 seconds");
+                    Serial.println(" try again in 2 seconds");
                 }
-                delay(10); // wait 5 seconds before retrying
+                vTaskDelay(pdMS_TO_TICKS(2000)); // wait 2 seconds before retrying
                 retries--;
             }
         }
