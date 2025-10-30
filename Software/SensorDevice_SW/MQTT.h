@@ -27,6 +27,8 @@ private:
     String _confTopic;          // topic for subscribing to configs
     String _last_ccu_address;   // stores the last known ccu address
 
+    unsigned long _lastReconnectAttempt = 0; // for non-blocking loop
+
     // returns true on success, false on failure after retries
     bool reconnect() {
         byte retries = 5; // try to connect 5 times
@@ -130,25 +132,48 @@ public:
 
     // returns true if connected, false if connection fails after retries
     bool loop() {
-        if ((*_p_ccu_address).isEmpty()) return false; // do nothing if ccu address is not set
+        if ((*_p_ccu_address).isEmpty()) {
+            _lastReconnectAttempt = 0; // reset timer if no address
+            return false; // do nothing if ccu address is not set
+        }
 
-        if (*_p_ccu_address != _last_ccu_address) { // if the server address has changed in the dashboard
+        if (*_p_ccu_address != _last_ccu_address) { // if the server address has changed
             if (_debug_enabled) { Serial.println("[MQTT] CCU address has changed. Reconfiguring MQTT client."); }
-            _mqttClient.setServer((*_p_ccu_address).c_str(), 1883); // update the server address
-            if (_debug_enabled) { Serial.print("[MQTT] setServer with "); Serial.println(*_p_ccu_address); }
-            _last_ccu_address = *_p_ccu_address; // save the new address
-            if (_mqttClient.connected()) { // if connected to the old server
-                _mqttClient.disconnect(); // disconnect to force a reconnect to the new server
+            _mqttClient.setServer((*_p_ccu_address).c_str(), 1883); 
+            _last_ccu_address = *_p_ccu_address;
+            if (_mqttClient.connected()) {
+                _mqttClient.disconnect(); 
             }
+            _lastReconnectAttempt = 0; // force immediate reconnect attempt
         }
 
-        if (!_mqttClient.connected()) { // if not connected
-            if (!reconnect()) { // try to reconnect
-                return false; // return failure if reconnect itself fails after retries
+        if (!_mqttClient.connected()) {
+            unsigned long now = millis();
+            // try to reconnect only every 5 seconds (non-blocking)
+            if (now - _lastReconnectAttempt > 5000) { 
+                _lastReconnectAttempt = now; // update the last attempt time
+
+                if (_debug_enabled) { Serial.println("[MQTT] Attempting MQTT connection..."); }
+
+                // this connect call is still blocking, but only for a single attempt,
+                // not for the entire retry loop
+                if (_mqttClient.connect(_device_id.c_str())) {
+                    if (_debug_enabled) { Serial.println("connected"); }
+                    _mqttClient.subscribe(_reqTopic.c_str());
+                    _mqttClient.subscribe(_confTopic.c_str());
+                } else {
+                    if (_debug_enabled) {
+                        Serial.print("failed, rc=");
+                        Serial.print(_mqttClient.state());
+                        Serial.println(" try again in 5 seconds");
+                    }
+                }
             }
+        } else { // if connected
+            _mqttClient.loop(); // process incoming messages and maintain connection
         }
-        _mqttClient.loop(); // process incoming messages and maintain connection
-        return _mqttClient.connected();
+        
+        return _mqttClient.connected(); // return the current status
     }
 
 
